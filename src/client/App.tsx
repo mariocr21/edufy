@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router";
 import { useAuthStore } from "./stores/authStore";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { ImportPage } from "./pages/ImportPage";
 import { AppLayout } from "./components/layout/AppLayout";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -32,7 +33,7 @@ export function App() {
                                 <Route path="/asistencia" element={<PlaceholderPage title="Asistencia" />} />
                                 <Route path="/prefectura" element={<PlaceholderPage title="Prefectura" />} />
                                 <Route path="/credenciales" element={<PlaceholderPage title="Credenciales" />} />
-                                <Route path="/importar" element={<PlaceholderPage title="Importar Datos" />} />
+                                <Route path="/importar" element={<ImportPage />} />
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </Routes>
                         </AppLayout>
