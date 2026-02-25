@@ -1,0 +1,16 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "edufy",
+    "main": "./src/worker/index.ts",
+    "compatibility_date": "2025-01-01",
+    "compatibility_flags": [
+        "nodejs_compat"
+    ],
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "edufy",
+            "database_id": "0608a343-d58c-4283-b7a2-c0f8a06a9874"
+        }
+    ]
+}
