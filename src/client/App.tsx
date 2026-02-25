@@ -3,6 +3,8 @@ import { useAuthStore } from "./stores/authStore";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ImportPage } from "./pages/ImportPage";
+import { StudentsPage } from "./pages/StudentsPage";
+import { TeachersPage } from "./pages/TeachersPage";
 import { AppLayout } from "./components/layout/AppLayout";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -27,8 +29,8 @@ export function App() {
                         <AppLayout>
                             <Routes>
                                 <Route path="/" element={<DashboardPage />} />
-                                <Route path="/alumnos" element={<PlaceholderPage title="Alumnos" />} />
-                                <Route path="/docentes" element={<PlaceholderPage title="Docentes" />} />
+                                <Route path="/alumnos" element={<StudentsPage />} />
+                                <Route path="/docentes" element={<TeachersPage />} />
                                 <Route path="/calificaciones" element={<PlaceholderPage title="Calificaciones" />} />
                                 <Route path="/asistencia" element={<PlaceholderPage title="Asistencia" />} />
                                 <Route path="/prefectura" element={<PlaceholderPage title="Prefectura" />} />
