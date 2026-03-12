@@ -28,19 +28,24 @@ students.get("/", requireAuth, async (c) => {
     const search = c.req.query("search");
     const career = c.req.query("career");
 
-    let query = "SELECT * FROM students WHERE active = 1";
+    let query = `
+        SELECT s.*, 
+               (SELECT phone FROM guardians WHERE student_id = s.id LIMIT 1) as primary_phone,
+               (SELECT name FROM guardians WHERE student_id = s.id LIMIT 1) as guardian_name
+        FROM students s WHERE s.active = 1
+    `;
     const params: (string | number)[] = [];
 
-    if (grupo) { query += " AND grupo = ?"; params.push(grupo); }
-    if (semester) { query += " AND semester = ?"; params.push(Number(semester)); }
-    if (career) { query += " AND career = ?"; params.push(career); }
+    if (grupo) { query += " AND s.grupo = ?"; params.push(grupo); }
+    if (semester) { query += " AND s.semester = ?"; params.push(Number(semester)); }
+    if (career) { query += " AND s.career = ?"; params.push(career); }
     if (search) {
-        query += " AND (name LIKE ? OR paterno LIKE ? OR materno LIKE ? OR no_control LIKE ? OR curp LIKE ?)";
+        query += " AND (s.name LIKE ? OR s.paterno LIKE ? OR s.materno LIKE ? OR s.no_control LIKE ? OR s.curp LIKE ?)";
         const s = `%${search}%`;
         params.push(s, s, s, s, s);
     }
 
-    query += " ORDER BY paterno, materno, name";
+    query += " ORDER BY s.paterno, s.materno, s.name";
 
     const stmt = db.prepare(query);
     const result = await (params.length ? stmt.bind(...params) : stmt).all();

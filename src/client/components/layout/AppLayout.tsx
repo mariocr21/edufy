@@ -12,6 +12,7 @@ import {
     Upload,
     LogOut,
     Menu,
+    FileText,
     X,
     Waves,
     ChevronLeft,
@@ -25,6 +26,7 @@ const navItems = [
     { to: "/asistencia", icon: CalendarCheck, label: "Asistencia" },
     { to: "/prefectura", icon: ShieldAlert, label: "Prefectura" },
     { to: "/credenciales", icon: CreditCard, label: "Credenciales" },
+    { to: "/tramites", icon: FileText, label: "Trámites" },
     { to: "/importar", icon: Upload, label: "Importar Datos" },
 ];
 

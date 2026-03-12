@@ -198,3 +198,31 @@ CREATE TABLE IF NOT EXISTS entry_logs (
 -- bcrypt hash for 'admin123'
 INSERT OR IGNORE INTO users (email, password_hash, role, display_name)
   VALUES ('admin@cetmar42.edu.mx', '$2a$10$rQdE3/cKPx6YPuE1e0Wz8OZ.YzYz7Khl4gU3PBwTqHfH9K5LhH.jC', 'admin', 'Administrador CETMAR 42');
+
+-- ── Student Documents (R2 Metadata) ──
+CREATE TABLE IF NOT EXISTS student_documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  document_type TEXT NOT NULL CHECK (document_type IN ('photo', 'acta_nacimiento', 'curp', 'certificado_secundaria', 'comprobante_domicilio', 'other')),
+  file_key TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  uploaded_by INTEGER,
+  uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (uploaded_by) REFERENCES users(id)
+);
+
+-- ── Document Requests (Trámites) ──
+CREATE TABLE IF NOT EXISTS document_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  request_type TEXT NOT NULL CHECK (request_type IN ('constancia_estudios', 'historial_academico', 'carta_buena_conducta', 'credencial_reposicion')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'rejected')),
+  comments TEXT,
+  requested_by INTEGER,
+  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (requested_by) REFERENCES users(id)
+);

@@ -9,6 +9,7 @@ import { AttendancePage } from "./pages/AttendancePage";
 import { GradesPage } from "./pages/GradesPage";
 import { PrefectPage } from "./pages/PrefectPage";
 import { CredentialsPage } from "./pages/CredentialsPage";
+import { ConstanciasPage } from "./pages/ConstanciasPage";
 import { AppLayout } from "./components/layout/AppLayout";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -39,6 +40,7 @@ export function App() {
                                 <Route path="/asistencia" element={<AttendancePage />} />
                                 <Route path="/prefectura" element={<PrefectPage />} />
                                 <Route path="/credenciales" element={<CredentialsPage />} />
+                                <Route path="/tramites" element={<ConstanciasPage />} />
                                 <Route path="/importar" element={<ImportPage />} />
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </Routes>
