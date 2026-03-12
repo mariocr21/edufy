@@ -1,16 +1,17 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings";
+import { requireAuth } from "../middleware/auth";
 
 const catalogs = new Hono<{ Bindings: Bindings }>();
 
 // ── Specialties ──
-catalogs.get("/specialties", async (c) => {
+catalogs.get("/specialties", requireAuth, async (c) => {
     const result = await c.env.DB.prepare("SELECT * FROM specialties ORDER BY code").all();
     return c.json({ success: true, data: result.results });
 });
 
 // ── Groups ──
-catalogs.get("/groups", async (c) => {
+catalogs.get("/groups", requireAuth, async (c) => {
     const periodId = c.req.query("period_id");
     let query = `
     SELECT g.*, s.name as specialty_name, s.code as specialty_code,
@@ -33,7 +34,7 @@ catalogs.get("/groups", async (c) => {
 });
 
 // ── Subjects ──
-catalogs.get("/subjects", async (c) => {
+catalogs.get("/subjects", requireAuth, async (c) => {
     const result = await c.env.DB
         .prepare(`
       SELECT sub.*, s.name as specialty_name, s.code as specialty_code
@@ -47,7 +48,7 @@ catalogs.get("/subjects", async (c) => {
 });
 
 // ── Schedules (by group) ──
-catalogs.get("/schedules", async (c) => {
+catalogs.get("/schedules", requireAuth, async (c) => {
     const groupId = c.req.query("group_id");
     if (!groupId) return c.json({ success: false, error: "group_id requerido" }, 400);
 

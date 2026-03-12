@@ -12,5 +12,11 @@
             "database_name": "edufy",
             "database_id": "0608a343-d58c-4283-b7a2-c0f8a06a9874"
         }
+    ],
+    "r2_buckets": [
+        {
+            "binding": "STORAGE",
+            "bucket_name": "edufy"
+        }
     ]
 }

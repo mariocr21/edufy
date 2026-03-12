@@ -1,165 +1,222 @@
-import { useEffect, useState } from "react";
-import { Users, GraduationCap, BookOpen, ShieldAlert, TrendingUp, CalendarCheck } from "lucide-react";
-import { api } from "../lib/api";
+import { useState, useEffect } from "react";
+import { 
+    Users, 
+    GraduationCap, 
+    Calendar, 
+    TrendingUp,
+    AlertTriangle,
+    ShieldAlert
+} from "lucide-react";
+import { 
+    BarChart, 
+    Bar, 
+    XAxis, 
+    YAxis, 
+    CartesianGrid, 
+    Tooltip, 
+    ResponsiveContainer,
+    Legend
+} from "recharts";
 import { useAuthStore } from "../stores/authStore";
 
-interface StatsData {
-    total: number;
-    by_group: { grupo: string; count: number }[];
-    by_career: { career: string; count: number }[];
+interface DashboardData {
+    summary: {
+        totalStudents: number;
+        totalTeachers: number;
+        totalGroups: number;
+        attendanceRate: number;
+    };
+    charts: {
+        attendanceByGroup: { name: string; asistencia: number }[];
+    };
+    recentIncidents: any[];
+    activePeriodName: string;
 }
 
 export function DashboardPage() {
-    const user = useAuthStore((s) => s.user);
-    const [stats, setStats] = useState<StatsData | null>(null);
+    const user = useAuthStore(state => state.user);
     const [loading, setLoading] = useState(true);
+    const [data, setData] = useState<DashboardData | null>(null);
 
     useEffect(() => {
-        api.get<StatsData>("/students/stats/summary").then((res) => {
-            if (res.success && res.data) setStats(res.data);
-            setLoading(false);
-        });
+        loadDashboardData();
     }, []);
 
-    const greeting = () => {
-        const hour = new Date().getHours();
-        if (hour < 12) return "Buenos días";
-        if (hour < 18) return "Buenas tardes";
-        return "Buenas noches";
+    const loadDashboardData = async () => {
+        try {
+            const token = useAuthStore.getState().token;
+            const res = await fetch("/api/dashboard/stats", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const result = await res.json() as { success: boolean, data: DashboardData };
+            if (result.success) {
+                setData(result.data);
+            }
+        } catch (error) {
+            console.error("Error fetching dashboard data:", error);
+        } finally {
+            setLoading(false);
+        }
     };
 
+    if (loading || !data) {
+        return (
+            <div className="flex flex-col items-center justify-center p-20">
+                <div className="w-10 h-10 border-4 border-gray-200 border-t-brand-500 rounded-full animate-spin mb-4" />
+                <p className="text-gray-500">Cargando métricas...</p>
+            </div>
+        );
+    }
+
+    const { summary, charts, recentIncidents, activePeriodName } = data;
+
     return (
-        <div className="space-y-6">
-            {/* Welcome */}
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                    {greeting()}, {user?.display_name?.split(" ")[0]} 👋
-                </h1>
-                <p className="text-gray-500 mt-1">Panel de control del CETMAR No. 42</p>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                <StatCard
-                    icon={Users}
-                    label="Alumnos Inscritos"
-                    value={loading ? "—" : String(stats?.total ?? 0)}
-                    color="blue"
-                />
-                <StatCard
-                    icon={GraduationCap}
-                    label="Docentes"
-                    value="—"
-                    color="emerald"
-                    subtext="Pendiente importar XML"
-                />
-                <StatCard
-                    icon={BookOpen}
-                    label="Especialidades"
-                    value="3"
-                    color="purple"
-                    subtext="ACUA · PIA · RSIA"
-                />
-                <StatCard
-                    icon={CalendarCheck}
-                    label="Período Activo"
-                    value="25-1"
-                    color="amber"
-                    subtext="Semestral 1 - 2025"
-                />
-            </div>
-
-            {/* Groups Overview */}
-            {stats && stats.by_group.length > 0 && (
-                <div className="card">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-brand-500" />
-                        Alumnos por Grupo
-                    </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                        {stats.by_group.map((g) => (
-                            <div
-                                key={g.grupo}
-                                className="p-4 bg-gradient-to-br from-brand-50 to-ocean-50 rounded-xl border border-brand-100"
-                            >
-                                <p className="text-2xl font-bold text-brand-700">{g.count}</p>
-                                <p className="text-sm text-gray-600 font-medium">{g.grupo}</p>
-                            </div>
-                        ))}
+        <div className="space-y-6 max-w-7xl mx-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                        ¡Hola, {user?.display_name?.split(' ')[0]}! 👋
+                    </h1>
+                    <p className="text-gray-500 mt-1">
+                        Resumen general • <span className="font-medium text-brand-600">{activePeriodName}</span>
+                    </p>
+                </div>
+                <div className="hidden sm:block">
+                    <div className="bg-brand-50 text-brand-700 px-4 py-2 rounded-lg font-medium text-sm flex items-center">
+                        <Calendar className="w-4 h-4 mr-2" />
+                        {new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                     </div>
                 </div>
-            )}
+            </div>
 
-            {/* Quick Actions */}
-            <div className="card">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <ShieldAlert className="w-5 h-5 text-brand-500" />
-                    Acciones Rápidas
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    <QuickAction
-                        label="Importar Calificaciones SISEMS"
-                        description="Sube el archivo XLSX de SISEMS"
-                        href="/importar"
-                    />
-                    <QuickAction
-                        label="Importar Horarios"
-                        description="Sube el XML de aSc Timetables"
-                        href="/importar"
-                    />
-                    <QuickAction
-                        label="Pasar Lista"
-                        description="Registra la asistencia del día"
-                        href="/asistencia"
-                    />
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-medium text-gray-500 text-sm">Alumnos Activos</h3>
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                            <Users className="w-5 h-5" />
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-3xl font-bold text-gray-900">{summary.totalStudents}</p>
+                        <p className="text-xs text-green-600 font-medium mt-1 flex items-center">
+                            <TrendingUp className="w-3 h-3 mr-1" />
+                            Matrícula total
+                        </p>
+                    </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-medium text-gray-500 text-sm">Docentes</h3>
+                        <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+                            <GraduationCap className="w-5 h-5" />
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-3xl font-bold text-gray-900">{summary.totalTeachers}</p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">
+                            Plantilla activa
+                        </p>
+                    </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-medium text-gray-500 text-sm">Grupos del Período</h3>
+                        <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+                            <Users className="w-5 h-5" />
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-3xl font-bold text-gray-900">{summary.totalGroups}</p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">
+                            Grupos formados
+                        </p>
+                    </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-medium text-gray-500 text-sm">Asistencia de Hoy</h3>
+                        <div className={`p-2 rounded-lg ${summary.attendanceRate >= 85 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                            {summary.attendanceRate >= 85 ? <TrendingUp className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-3xl font-bold text-gray-900">{summary.attendanceRate}%</p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">
+                            Basado en pases de lista
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Main Chart */}
+                <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                    <h2 className="text-lg font-bold text-gray-900 mb-6">Asistencia por Grupo (Hoy)</h2>
+                    <div className="h-72 w-full">
+                        {charts.attendanceByGroup.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={charts.attendanceByGroup} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} dy={10} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} domain={[0, 100]} />
+                                    <Tooltip 
+                                        cursor={{fill: '#F3F4F6'}}
+                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                    />
+                                    <Legend />
+                                    <Bar dataKey="asistencia" name="% Asistencia" fill="#0284c7" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                <BarChart className="w-8 h-8 mb-2 opacity-50" />
+                                <p>Sin datos de asistencia para mostrar</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Right Column: Incidents & Alerts */}
+                <div className="space-y-6">
+                    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-full">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-lg font-bold text-gray-900 flex items-center">
+                                <ShieldAlert className="w-5 h-5 mr-2 text-brand-600" />
+                                Últimas Incidencias
+                            </h2>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            {recentIncidents.length > 0 ? (
+                                recentIncidents.map((incident) => (
+                                    <div key={incident.id} className="flex gap-3 pb-4 border-b border-gray-50 last:border-0 last:pb-0">
+                                        <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
+                                            incident.report_type === 'suspension' ? 'bg-red-500' :
+                                            incident.report_type === 'amonestacion' ? 'bg-orange-500' : 'bg-blue-500'
+                                        }`} />
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-900">
+                                                {incident.name} {incident.paterno}
+                                            </p>
+                                            <p className="text-xs text-gray-500 line-clamp-2 mt-0.5">
+                                                {incident.description}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-sm text-gray-500 text-center py-4">No hay incidencias reportadas recientemente.</p>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
-    );
-}
-
-function StatCard({
-    icon: Icon,
-    label,
-    value,
-    color,
-    subtext,
-}: {
-    icon: React.ComponentType<{ className?: string }>;
-    label: string;
-    value: string;
-    color: "blue" | "emerald" | "purple" | "amber";
-    subtext?: string;
-}) {
-    const colors = {
-        blue: "bg-blue-100 text-blue-600",
-        emerald: "bg-emerald-100 text-emerald-600",
-        purple: "bg-purple-100 text-purple-600",
-        amber: "bg-amber-100 text-amber-600",
-    };
-
-    return (
-        <div className="stat-card">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${colors[color]}`}>
-                <Icon className="w-6 h-6" />
-            </div>
-            <div>
-                <p className="text-2xl font-bold text-gray-900">{value}</p>
-                <p className="text-sm text-gray-500">{label}</p>
-                {subtext && <p className="text-xs text-gray-400 mt-0.5">{subtext}</p>}
-            </div>
-        </div>
-    );
-}
-
-function QuickAction({ label, description, href }: { label: string; description: string; href: string }) {
-    return (
-        <a
-            href={href}
-            className="block p-4 rounded-xl border border-gray-200 hover:border-brand-300 hover:bg-brand-50/50 transition-all group"
-        >
-            <p className="font-medium text-gray-900 group-hover:text-brand-700 transition-colors">{label}</p>
-            <p className="text-xs text-gray-500 mt-1">{description}</p>
-        </a>
     );
 }

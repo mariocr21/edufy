@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../bindings";
+import { requireAuth } from "../middleware/auth";
 
 const students = new Hono<{ Bindings: Bindings }>();
 
@@ -20,7 +21,7 @@ const studentSchema = z.object({
 });
 
 // ── GET /api/students ──
-students.get("/", async (c) => {
+students.get("/", requireAuth, async (c) => {
     const db = c.env.DB;
     const grupo = c.req.query("grupo");
     const semester = c.req.query("semester");
@@ -48,7 +49,7 @@ students.get("/", async (c) => {
 });
 
 // ── GET /api/students/stats/summary ──
-students.get("/stats/summary", async (c) => {
+students.get("/stats/summary", requireAuth, async (c) => {
     const db = c.env.DB;
     const total = await db.prepare("SELECT COUNT(*) as count FROM students WHERE active = 1").first<{ count: number }>();
     const byGroup = await db.prepare("SELECT grupo, COUNT(*) as count FROM students WHERE active = 1 GROUP BY grupo ORDER BY grupo").all();
@@ -61,7 +62,7 @@ students.get("/stats/summary", async (c) => {
 });
 
 // ── GET /api/students/:id ──
-students.get("/:id", async (c) => {
+students.get("/:id", requireAuth, async (c) => {
     const id = c.req.param("id");
     const db = c.env.DB;
 
@@ -74,7 +75,7 @@ students.get("/:id", async (c) => {
 });
 
 // ── POST /api/students ──
-students.post("/", zValidator("json", studentSchema), async (c) => {
+students.post("/", requireAuth, zValidator("json", studentSchema), async (c) => {
     const body = c.req.valid("json");
     const db = c.env.DB;
 
@@ -90,7 +91,7 @@ students.post("/", zValidator("json", studentSchema), async (c) => {
 });
 
 // ── PUT /api/students/:id ──
-students.put("/:id", zValidator("json", studentSchema.partial()), async (c) => {
+students.put("/:id", requireAuth, zValidator("json", studentSchema.partial()), async (c) => {
     const id = c.req.param("id");
     const body = c.req.valid("json");
     const db = c.env.DB;
@@ -114,7 +115,7 @@ students.put("/:id", zValidator("json", studentSchema.partial()), async (c) => {
 });
 
 // ── DELETE /api/students/:id ── (soft delete)
-students.delete("/:id", async (c) => {
+students.delete("/:id", requireAuth, async (c) => {
     const id = c.req.param("id");
     await c.env.DB.prepare("UPDATE students SET active = 0 WHERE id = ?").bind(id).run();
     return c.json({ success: true });

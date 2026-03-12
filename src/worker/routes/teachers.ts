@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../bindings";
+import { requireAuth } from "../middleware/auth";
 
 const teachers = new Hono<{ Bindings: Bindings }>();
 
@@ -12,7 +13,7 @@ const teacherSchema = z.object({
 });
 
 // ── GET /api/teachers ──
-teachers.get("/", async (c) => {
+teachers.get("/", requireAuth, async (c) => {
     const db = c.env.DB;
     const search = c.req.query("search");
 
@@ -34,7 +35,7 @@ teachers.get("/", async (c) => {
 });
 
 // ── GET /api/teachers/:id ──
-teachers.get("/:id", async (c) => {
+teachers.get("/:id", requireAuth, async (c) => {
     const id = c.req.param("id");
     const teacher = await c.env.DB.prepare("SELECT * FROM teachers WHERE id = ?").bind(id).first();
     if (!teacher) return c.json({ success: false, error: "Docente no encontrado" }, 404);
@@ -56,7 +57,7 @@ teachers.get("/:id", async (c) => {
 });
 
 // ── POST /api/teachers ──
-teachers.post("/", zValidator("json", teacherSchema), async (c) => {
+teachers.post("/", requireAuth, zValidator("json", teacherSchema), async (c) => {
     const body = c.req.valid("json");
     const result = await c.env.DB
         .prepare("INSERT INTO teachers (name, short_name, specialty) VALUES (?, ?, ?)")
@@ -67,7 +68,7 @@ teachers.post("/", zValidator("json", teacherSchema), async (c) => {
 });
 
 // ── PUT /api/teachers/:id ──
-teachers.put("/:id", zValidator("json", teacherSchema.partial()), async (c) => {
+teachers.put("/:id", requireAuth, zValidator("json", teacherSchema.partial()), async (c) => {
     const id = c.req.param("id");
     const body = c.req.valid("json");
 
@@ -90,7 +91,7 @@ teachers.put("/:id", zValidator("json", teacherSchema.partial()), async (c) => {
 });
 
 // ── DELETE /api/teachers/:id ──
-teachers.delete("/:id", async (c) => {
+teachers.delete("/:id", requireAuth, async (c) => {
     await c.env.DB.prepare("DELETE FROM teachers WHERE id = ?").bind(c.req.param("id")).run();
     return c.json({ success: true });
 });

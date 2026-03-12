@@ -5,6 +5,10 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { ImportPage } from "./pages/ImportPage";
 import { StudentsPage } from "./pages/StudentsPage";
 import { TeachersPage } from "./pages/TeachersPage";
+import { AttendancePage } from "./pages/AttendancePage";
+import { GradesPage } from "./pages/GradesPage";
+import { PrefectPage } from "./pages/PrefectPage";
+import { CredentialsPage } from "./pages/CredentialsPage";
 import { AppLayout } from "./components/layout/AppLayout";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -31,10 +35,10 @@ export function App() {
                                 <Route path="/" element={<DashboardPage />} />
                                 <Route path="/alumnos" element={<StudentsPage />} />
                                 <Route path="/docentes" element={<TeachersPage />} />
-                                <Route path="/calificaciones" element={<PlaceholderPage title="Calificaciones" />} />
-                                <Route path="/asistencia" element={<PlaceholderPage title="Asistencia" />} />
-                                <Route path="/prefectura" element={<PlaceholderPage title="Prefectura" />} />
-                                <Route path="/credenciales" element={<PlaceholderPage title="Credenciales" />} />
+                                <Route path="/calificaciones" element={<GradesPage />} />
+                                <Route path="/asistencia" element={<AttendancePage />} />
+                                <Route path="/prefectura" element={<PrefectPage />} />
+                                <Route path="/credenciales" element={<CredentialsPage />} />
                                 <Route path="/importar" element={<ImportPage />} />
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </Routes>

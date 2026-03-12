@@ -8,10 +8,11 @@ const ROSTER_HEADERS = [
     "SEMESTRE", "GRUPO", "NO CONTROL", "NOMBRE", "PATERNO", "MATERNO", "CURP",
 ] as const;
 
-// 22-column format: roster + grades + attendance
+// 25-column format: roster + subjects + grades + attendance
 const GRADES_HEADERS = [
     "CLV_CENTRO", "PLANTEL", "CARRERA", "GENERACION", "TURNO",
     "SEMESTRE", "GRUPO", "NO CONTROL", "NOMBRE", "PATERNO", "MATERNO", "CURP",
+    "NOMBRE ASIGNATURA", "NOMBRE DOCENTE", "RFC DOCENTE", 
     "PERIODO 1", "PERIODO 2", "PERIODO 3", "CALIFICACION",
     "ASISTENCIA PERIODO 1", "ASISTENCIA PERIODO 2", "ASISTENCIA PERIODO 3",
     "TIPO ACRED.", "PERIODO", "FIRMADO",
@@ -37,6 +38,7 @@ interface ParsedGrade {
     final_score: number | null;
     acred_type: string | null;
     periodo_name: string | null;
+    subject_name: string;
 }
 
 export interface SisemsParsedData {
@@ -48,7 +50,7 @@ export interface SisemsParsedData {
 
 /**
  * Parses SISEMS XLSX data (already converted to array of arrays).
- * Detects format by column count: 12 = roster, 22 = grades.
+ * Detects format by column count: 12 = roster, 25 = grades.
  */
 export function parseSisemsData(rows: (string | number | null)[][]): SisemsParsedData {
     const warnings: string[] = [];
@@ -59,7 +61,7 @@ export function parseSisemsData(rows: (string | number | null)[][]): SisemsParse
 
     const headerRow = rows[0]!;
     const colCount = headerRow.length;
-    const isGrades = colCount >= 20;
+    const isGrades = colCount >= 24; // At least 24 cols for the 25-col format
     const type = isGrades ? "grades" : "roster";
 
     // Validate expected headers
@@ -101,24 +103,28 @@ export function parseSisemsData(rows: (string | number | null)[][]): SisemsParse
             });
         }
 
-        // Parse grades if 22-column format
+        // Parse grades if 25-column format
         if (isGrades) {
-            const p1 = parseScore(row[12]);
-            const p2 = parseScore(row[13]);
-            const p3 = parseScore(row[14]);
-            const final_score = parseScore(row[15]);
-            const acred_type = row[19] ? String(row[19]).trim() : null;
-            const periodo_name = row[20] ? String(row[20]).trim() : null;
+            const subject_name = String(row[12] ?? "").trim();
+            const p1 = parseScore(row[15]);
+            const p2 = parseScore(row[16]);
+            const p3 = parseScore(row[17]);
+            const final_score = parseScore(row[18]);
+            const acred_type = row[22] ? String(row[22]).trim() : null;
+            const periodo_name = row[23] ? String(row[23]).trim() : null;
 
-            grades.push({
-                no_control: noControl,
-                partial_1: p1,
-                partial_2: p2,
-                partial_3: p3,
-                final_score,
-                acred_type,
-                periodo_name,
-            });
+            if (subject_name) {
+                grades.push({
+                    no_control: noControl,
+                    partial_1: p1,
+                    partial_2: p2,
+                    partial_3: p3,
+                    final_score,
+                    acred_type,
+                    periodo_name,
+                    subject_name,
+                });
+            }
         }
     }
 
@@ -225,21 +231,52 @@ export async function importSisemsToD1(
 
             if (!student) continue;
 
-            // Check if grade already exists for this student+period
+            // Find or create subject based on name
+            let subjectId: number | null = null;
+            if (g.subject_name) {
+                const subject = await db
+                    .prepare("SELECT id FROM subjects WHERE name = ? COLLATE NOCASE OR short_code = ? COLLATE NOCASE")
+                    .bind(g.subject_name, g.subject_name)
+                    .first<{ id: number }>();
+                
+                if (subject) {
+                    subjectId = subject.id;
+                } else {
+                    // Create basic subject record if it doesn't exist
+                    const newSub = await db
+                        .prepare("INSERT INTO subjects (name, short_code) VALUES (?, ?)")
+                        .bind(g.subject_name, g.subject_name.substring(0, 10))
+                        .run();
+                    subjectId = newSub.meta.last_row_id as number;
+                }
+            }
+
+            // Check if grade already exists for this student+period+subject
             const existingGrade = await db
-                .prepare("SELECT id FROM grades WHERE student_id = ? AND period_id = ? AND subject_id IS NULL")
-                .bind(student.id, periodId)
+                .prepare("SELECT id FROM grades WHERE student_id = ? AND period_id = ? AND (subject_id = ? OR subject_id IS NULL)")
+                .bind(student.id, periodId, subjectId)
                 .first<{ id: number }>();
 
             if (existingGrade) {
                 await db
-                    .prepare("UPDATE grades SET partial_1=?, partial_2=?, partial_3=?, final_score=?, acred_type=? WHERE id=?")
-                    .bind(g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type, existingGrade.id)
+                    .prepare(`
+                        UPDATE grades SET 
+                            partial_1=?, partial_2=?, partial_3=?, 
+                            final_score=?, acred_type=?, subject_id=? 
+                        WHERE id=?
+                    `)
+                    .bind(g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type, subjectId, existingGrade.id)
                     .run();
             } else {
                 await db
-                    .prepare("INSERT INTO grades (student_id, period_id, partial_1, partial_2, partial_3, final_score, acred_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, 'sisems')")
-                    .bind(student.id, periodId, g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type)
+                    .prepare(`
+                        INSERT INTO grades (
+                            student_id, period_id, subject_id, 
+                            partial_1, partial_2, partial_3, 
+                            final_score, acred_type, source
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sisems')
+                    `)
+                    .bind(student.id, periodId, subjectId, g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type)
                     .run();
             }
             gradesImported++;

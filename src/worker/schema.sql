@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS attendance (
   marked_by INTEGER NOT NULL,
   FOREIGN KEY (student_id) REFERENCES students(id),
   FOREIGN KEY (schedule_id) REFERENCES schedules(id),
-  FOREIGN KEY (marked_by) REFERENCES users(id)
+  FOREIGN KEY (marked_by) REFERENCES users(id),
+  UNIQUE (student_id, schedule_id, date)
 );
 
 -- ── Conduct Reports ──

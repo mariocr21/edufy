@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings";
+import { requireAuth } from "../middleware/auth";
 import { parseSisemsData, importSisemsToD1 } from "../parsers/sisems";
 import { parseAscXml, importAscToD1 } from "../parsers/asc-timetables";
 import * as XLSX from "xlsx";
@@ -7,7 +8,7 @@ import * as XLSX from "xlsx";
 const importRoutes = new Hono<{ Bindings: Bindings }>();
 
 // ── GET /api/import/periods ── List available periods
-importRoutes.get("/periods", async (c) => {
+importRoutes.get("/periods", requireAuth, async (c) => {
     const db = c.env.DB;
     const periods = await db
         .prepare("SELECT * FROM periods ORDER BY year DESC, id DESC")
@@ -16,7 +17,7 @@ importRoutes.get("/periods", async (c) => {
 });
 
 // ── POST /api/import/period ── Create a new period
-importRoutes.post("/period", async (c) => {
+importRoutes.post("/period", requireAuth, async (c) => {
     const body = await c.req.json<{
         name: string;
         year: number;
@@ -42,7 +43,7 @@ importRoutes.post("/period", async (c) => {
 });
 
 // ── POST /api/import/sisems ── Upload SISEMS XLSX (multipart/form-data)
-importRoutes.post("/sisems", async (c) => {
+importRoutes.post("/sisems", requireAuth, async (c) => {
     const db = c.env.DB;
 
     const formData = await c.req.formData();
@@ -99,7 +100,7 @@ importRoutes.post("/sisems", async (c) => {
 });
 
 // ── POST /api/import/horarios ── Upload aSc Timetables XML
-importRoutes.post("/horarios", async (c) => {
+importRoutes.post("/horarios", requireAuth, async (c) => {
     const db = c.env.DB;
 
     const formData = await c.req.formData();
@@ -138,7 +139,7 @@ importRoutes.post("/horarios", async (c) => {
 });
 
 // ── GET /api/import/history ── Import summary stats
-importRoutes.get("/stats", async (c) => {
+importRoutes.get("/stats", requireAuth, async (c) => {
     const db = c.env.DB;
 
     const students = await db.prepare("SELECT COUNT(*) as count FROM students WHERE active=1").first<{ count: number }>();
