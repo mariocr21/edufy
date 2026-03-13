@@ -15,8 +15,7 @@ import {
     ArrowLeft,
     Save,
     BarChart3,
-    Filter,
-    Download
+    Filter
 } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
 
@@ -361,7 +360,7 @@ export function AttendancePage() {
                                         {(["present", "absent", "late", "justified"] as const).map((status) => {
                                             const isSelected = student.status === status;
                                             
-                                            let bgClass = "hover:bg-gray-200 text-gray-400";
+                                            const bgClass = "hover:bg-gray-200 text-gray-400";
                                             let activeClass = "";
                                             
                                             // Conditional styling based on status

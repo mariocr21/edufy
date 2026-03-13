@@ -4,16 +4,13 @@ import {
     IdCard,
     Search,
     Printer,
-    Download,
     QrCode,
     Camera,
     RefreshCw,
     CheckCircle2,
     XCircle
 } from "lucide-react";
-import QRCode from "react-qr-code";
 import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import { useAuthStore } from "../stores/authStore";
 
 interface CredentialRow {
@@ -189,7 +186,6 @@ export function CredentialsPage() {
                 // Actually jsPDF splitTextToSize might have bad typings in some versions, but it's string, number.
                 // Re-writing to avoid any typing quirks with the return type of jsPDF.
                 const splitName = pdf.splitTextToSize(fullName, cardW - 35);
-                // @ts-ignore
                 pdf.text(splitName, x + 5, y + 20);
                 
                 pdf.setFont("helvetica", "normal");
@@ -200,7 +196,6 @@ export function CredentialsPage() {
                 // Add QR Image to the right side of the card
                 // We create a temporary canvas to render the QR code
                 const qrVal = s.qr_token!;
-                const canvas = document.createElement('canvas');
                 // Use a library or the react-qr-code SVG to draw on canvas. 
                 // For simplicity here, we'll just plot a placeholder rect in PDF 
                 // In production, html2canvas over a hidden div with <QRCode> is better.

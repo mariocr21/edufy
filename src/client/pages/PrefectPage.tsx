@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { format, parseISO } from "date-fns";
-import { es } from "date-fns/locale";
 import {
     ShieldAlert,
     Search,
@@ -43,7 +42,6 @@ interface ConductReport {
 }
 
 export function PrefectPage() {
-    const user = useAuthStore(s => s.user);
     const [loading, setLoading] = useState(false);
     const [reports, setReports] = useState<ConductReport[]>([]);
     

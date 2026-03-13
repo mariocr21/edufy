@@ -146,7 +146,6 @@ export function parseAscXml(xmlText: string): AscParsedData {
             continue;
         }
 
-        const day = parseInt(attrs.days || "0", 10);
         const period = parseInt(attrs.period || "0", 10);
 
         // days in XML is a bitmask string like "01000" (Tuesday)

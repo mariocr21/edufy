@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { format } from "date-fns";
+import { useState, useEffect, useCallback } from "react";
 import {
     GraduationCap,
     Search,
@@ -47,7 +46,6 @@ interface Group {
 }
 
 export function GradesPage() {
-    const user = useAuthStore((s) => s.user);
     const [loading, setLoading] = useState(false);
     const [grades, setGrades] = useState<GradeRow[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
@@ -66,25 +64,7 @@ export function GradesPage() {
         total_grades: 0
     });
 
-    // Initial load: fetch catalogs
-    useEffect(() => {
-        loadCatalogs();
-    }, []);
-
-    // When filters change, load data
-    useEffect(() => {
-        if (selectedGroup) {
-            loadGrades();
-        } else {
-            setGrades([]);
-        }
-        
-        if (selectedPeriod) {
-            loadStats();
-        }
-    }, [selectedGroup, selectedPeriod]);
-
-    const loadCatalogs = async () => {
+    const loadCatalogs = useCallback(async () => {
         try {
             const token = useAuthStore.getState().token;
             const headers = { Authorization: `Bearer ${token}` };
@@ -110,9 +90,9 @@ export function GradesPage() {
         } catch (error) {
             console.error("Error loading catalogs:", error);
         }
-    };
+    }, []);
 
-    const loadGrades = async () => {
+    const loadGrades = useCallback(async () => {
         if (!selectedGroup) return;
         
         try {
@@ -134,9 +114,9 @@ export function GradesPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [selectedGroup, selectedPeriod]);
 
-    const loadStats = async () => {
+    const loadStats = useCallback(async () => {
         try {
             const token = useAuthStore.getState().token;
             let url = `/api/grades/stats`;
@@ -158,7 +138,25 @@ export function GradesPage() {
         } catch (error) {
             console.error("Error loading stats:", error);
         }
-    };
+    }, [selectedPeriod]);
+
+    // Initial load: fetch catalogs
+    useEffect(() => {
+        loadCatalogs();
+    }, [loadCatalogs]);
+
+    // When filters change, load data
+    useEffect(() => {
+        if (selectedGroup) {
+            loadGrades();
+        } else {
+            setGrades([]);
+        }
+
+        if (selectedPeriod) {
+            loadStats();
+        }
+    }, [loadGrades, loadStats, selectedGroup, selectedPeriod]);
 
     const filteredGrades = grades.filter(g => {
         const fullName = `${g.paterno} ${g.materno} ${g.student_name}`.toLowerCase();

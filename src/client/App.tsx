@@ -11,10 +11,23 @@ import { PrefectPage } from "./pages/PrefectPage";
 import { CredentialsPage } from "./pages/CredentialsPage";
 import { ConstanciasPage } from "./pages/ConstanciasPage";
 import { AppLayout } from "./components/layout/AppLayout";
+import type { UserRole } from "../shared/types";
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({
+    children,
+    allowedRoles,
+}: {
+    children: React.ReactNode;
+    allowedRoles?: UserRole[];
+}) {
     const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+    const user = useAuthStore((s) => s.user);
+
     if (!isAuthenticated) return <Navigate to="/login" replace />;
+    if (allowedRoles && (!user || !allowedRoles.includes(user.role))) {
+        return <Navigate to="/" replace />;
+    }
+
     return <>{children}</>;
 }
 
@@ -35,13 +48,62 @@ export function App() {
                             <Routes>
                                 <Route path="/" element={<DashboardPage />} />
                                 <Route path="/alumnos" element={<StudentsPage />} />
-                                <Route path="/docentes" element={<TeachersPage />} />
-                                <Route path="/calificaciones" element={<GradesPage />} />
-                                <Route path="/asistencia" element={<AttendancePage />} />
-                                <Route path="/prefectura" element={<PrefectPage />} />
-                                <Route path="/credenciales" element={<CredentialsPage />} />
-                                <Route path="/tramites" element={<ConstanciasPage />} />
-                                <Route path="/importar" element={<ImportPage />} />
+                                <Route
+                                    path="/docentes"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin"]}>
+                                            <TeachersPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/calificaciones"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin", "teacher"]}>
+                                            <GradesPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/asistencia"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin", "teacher", "prefect"]}>
+                                            <AttendancePage />
+                                        </ProtectedRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/prefectura"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin", "prefect"]}>
+                                            <PrefectPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/credenciales"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin", "prefect"]}>
+                                            <CredentialsPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/tramites"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin"]}>
+                                            <ConstanciasPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/importar"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin"]}>
+                                            <ImportPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </Routes>
                         </AppLayout>
@@ -49,16 +111,5 @@ export function App() {
                 }
             />
         </Routes>
-    );
-}
-
-function PlaceholderPage({ title }: { title: string }) {
-    return (
-        <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-700 mb-2">{title}</h2>
-                <p className="text-gray-500">Módulo en desarrollo</p>
-            </div>
-        </div>
     );
 }

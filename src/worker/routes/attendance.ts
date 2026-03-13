@@ -116,7 +116,7 @@ attendance.post("/batch", requireAuth, requireRoles(["teacher", "admin"]), zVali
             await db.batch(statements);
         }
         return c.json({ success: true, message: `Asistencia guardada (${statements.length} registros)` });
-    } catch (error) {
+    } catch {
         return c.json({ success: false, error: "Error guardando asistencia" }, 500);
     }
 });

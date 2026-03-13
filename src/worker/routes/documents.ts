@@ -1,6 +1,4 @@
 import { Hono } from "hono";
-import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../bindings";
 import { requireAuth } from "../middleware/auth";
 
