@@ -46,6 +46,23 @@ interface ConductReport {
     grupo?: string;
 }
 
+const incidentTypeLabels: Record<string, string> = {
+    amonestacion: "Amonestacion",
+    suspension: "Suspension",
+    nota: "Nota",
+    warning: "Amonestacion",
+    note: "Nota",
+};
+
+const documentTypeLabels: Record<string, string> = {
+    photo: "Fotografia",
+    acta_nacimiento: "Acta de nacimiento",
+    curp: "CURP",
+    certificado_secundaria: "Certificado de secundaria",
+    comprobante_domicilio: "Comprobante de domicilio",
+    other: "Otro",
+};
+
 export function PrefectPage() {
     const [loading, setLoading] = useState(false);
     const [reports, setReports] = useState<ConductReport[]>([]);
@@ -226,8 +243,6 @@ export function PrefectPage() {
     };
 
     const deleteReport = async (id: number) => {
-        if (!confirm("¿Estás seguro de que deseas eliminar este reporte?")) return;
-        
         try {
             const token = useAuthStore.getState().token;
             const res = await fetch(`/api/conduct/${id}`, {
@@ -591,7 +606,9 @@ export function PrefectPage() {
                                                     <div key={document.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 p-3 text-sm">
                                                         <div className="min-w-0">
                                                             <p className="truncate font-medium text-gray-900">{document.file_name}</p>
-                                                            <p className="truncate text-xs text-gray-500">{document.document_type}</p>
+                                                            <p className="truncate text-xs text-gray-500">
+                                                                {documentTypeLabels[document.document_type] ?? document.document_type}
+                                                            </p>
                                                         </div>
                                                         {document.is_primary && (
                                                             <span className="rounded-full bg-brand-100 px-2 py-1 text-xs font-medium text-brand-700">
@@ -616,7 +633,9 @@ export function PrefectPage() {
                                                 studentProfile.recent_incidents.map((incident) => (
                                                     <div key={incident.id} className="rounded-xl border border-gray-100 p-3">
                                                         <div className="flex items-center justify-between gap-3">
-                                                            <p className="text-sm font-medium text-gray-900">{incident.report_type ?? incident.type ?? "nota"}</p>
+                                                            <p className="text-sm font-medium text-gray-900">
+                                                                {incidentTypeLabels[incident.report_type ?? incident.type ?? "nota"] ?? "Nota"}
+                                                            </p>
                                                             <p className="text-xs text-gray-500">{format(parseISO(incident.date), "dd/MM/yyyy")}</p>
                                                         </div>
                                                         <p className="mt-2 text-sm text-gray-700">{incident.description}</p>
