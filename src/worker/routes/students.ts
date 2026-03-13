@@ -165,7 +165,7 @@ students.get("/:id/profile", requireAuth, async (c) => {
                 cr.description,
                 cr.date,
                 ${conductSchema.hasCreatedAt ? "cr.created_at" : "NULL"} as created_at,
-                u.name as reported_by_name
+                u.display_name as reported_by_name
             FROM conduct_reports cr
             LEFT JOIN users u ON cr.reported_by = u.id
             WHERE cr.student_id = ?

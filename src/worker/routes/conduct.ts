@@ -69,7 +69,7 @@ conduct.get("/student/:studentId", requireAuth, async (c) => {
             cr.description,
             cr.date,
             ${schema.hasCreatedAt ? "cr.created_at" : "NULL"} as created_at,
-            u.name as reported_by_name
+            u.display_name as reported_by_name
         FROM conduct_reports cr
         LEFT JOIN users u ON cr.reported_by = u.id
         WHERE cr.student_id = ?
@@ -94,7 +94,7 @@ conduct.get("/recent", requireAuth, requireRoles(["admin", "prefect"]), async (c
                cr.date,
                ${schema.hasCreatedAt ? "cr.created_at" : "NULL"} as created_at,
                st.name as student_name, st.paterno, st.materno, st.no_control, st.grupo,
-               u.name as reported_by_name
+               u.display_name as reported_by_name
         FROM conduct_reports cr
         JOIN students st ON cr.student_id = st.id
         LEFT JOIN users u ON cr.reported_by = u.id
