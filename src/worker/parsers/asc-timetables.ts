@@ -195,6 +195,7 @@ export async function importAscToD1(
     let subjectsUpserted = 0;
     let groupsCreated = 0;
     let schedulesCreated = 0;
+    const statements: any[] = [];
 
     // Map XML IDs → DB IDs
     const teacherIdMap = new Map<string, number>();
@@ -203,57 +204,43 @@ export async function importAscToD1(
 
     // ── Teachers ──
     for (const t of data.teachers) {
-        const existing = await db
-            .prepare("SELECT id FROM teachers WHERE xml_id = ?")
-            .bind(t.xml_id)
-            .first<{ id: number }>();
-
+        const existing = await db.prepare("SELECT id FROM teachers WHERE xml_id = ?").bind(t.xml_id).first<{ id: number }>();
         if (existing) {
-            await db
-                .prepare("UPDATE teachers SET name=?, short_name=? WHERE id=?")
-                .bind(t.name, t.short_name, existing.id)
-                .run();
+            statements.push(db.prepare("UPDATE teachers SET name=?, short_name=? WHERE id=?").bind(t.name, t.short_name, existing.id));
             teacherIdMap.set(t.xml_id, existing.id);
         } else {
-            const result = await db
-                .prepare("INSERT INTO teachers (xml_id, name, short_name) VALUES (?, ?, ?)")
-                .bind(t.xml_id, t.name, t.short_name)
-                .run();
+            const result = await db.prepare("INSERT INTO teachers (xml_id, name, short_name) VALUES (?, ?, ?)").bind(t.xml_id, t.name, t.short_name).run();
             teacherIdMap.set(t.xml_id, result.meta.last_row_id as number);
         }
         teachersUpserted++;
+        if (statements.length >= 50) {
+            await db.batch(statements);
+            statements.length = 0;
+        }
     }
 
     // ── Subjects ──
     for (const s of data.subjects) {
-        const existing = await db
-            .prepare("SELECT id FROM subjects WHERE xml_id = ?")
-            .bind(s.xml_id)
-            .first<{ id: number }>();
-
+        const existing = await db.prepare("SELECT id FROM subjects WHERE xml_id = ?").bind(s.xml_id).first<{ id: number }>();
         if (existing) {
-            await db
-                .prepare("UPDATE subjects SET name=?, short_code=? WHERE id=?")
-                .bind(s.name, s.short_code, existing.id)
-                .run();
+            statements.push(db.prepare("UPDATE subjects SET name=?, short_code=? WHERE id=?").bind(s.name, s.short_code, existing.id));
             subjectIdMap.set(s.xml_id, existing.id);
         } else {
-            const result = await db
-                .prepare("INSERT INTO subjects (xml_id, name, short_code) VALUES (?, ?, ?)")
-                .bind(s.xml_id, s.name, s.short_code)
-                .run();
+            const result = await db.prepare("INSERT INTO subjects (xml_id, name, short_code) VALUES (?, ?, ?)").bind(s.xml_id, s.name, s.short_code).run();
             subjectIdMap.set(s.xml_id, result.meta.last_row_id as number);
         }
         subjectsUpserted++;
+        if (statements.length >= 50) {
+            await db.batch(statements);
+            statements.length = 0;
+        }
     }
 
     // ── Classes → Groups ──
     for (const cls of data.classes) {
-        // Extract semester from class name (e.g. "2 ACUA" → semester 2)
         const semesterMatch = cls.name.match(/^(\d)/);
         const semester = semesterMatch ? parseInt(semesterMatch[1]!, 10) : 0;
 
-        // Find specialty from name
         let specialtyId: number | null = null;
         const nameUpper = cls.name.toUpperCase();
         if (nameUpper.includes("ACUA")) {
@@ -267,27 +254,30 @@ export async function importAscToD1(
             if (sp) specialtyId = sp.id;
         }
 
-        const existing = await db
-            .prepare("SELECT id FROM groups_table WHERE period_id = ? AND name = ?")
-            .bind(periodId, cls.name)
-            .first<{ id: number }>();
-
+        const existing = await db.prepare("SELECT id FROM groups_table WHERE period_id = ? AND name = ?").bind(periodId, cls.name).first<{ id: number }>();
         if (existing) {
             classIdMap.set(cls.xml_id, existing.id);
         } else {
-            const result = await db
-                .prepare("INSERT INTO groups_table (period_id, name, semester, specialty_id) VALUES (?, ?, ?, ?)")
-                .bind(periodId, cls.name, semester, specialtyId)
-                .run();
+            const result = await db.prepare("INSERT INTO groups_table (period_id, name, semester, specialty_id) VALUES (?, ?, ?, ?)").bind(periodId, cls.name, semester, specialtyId).run();
             classIdMap.set(cls.xml_id, result.meta.last_row_id as number);
             groupsCreated++;
         }
     }
 
+    // Execute any remaining statements from teachers/subjects before moving to schedules
+    if (statements.length > 0) {
+        await db.batch(statements);
+        statements.length = 0;
+    }
+
     // ── Schedule Cards ──
     // Clear existing schedules for this period's groups to avoid duplicates on re-import
     for (const groupId of classIdMap.values()) {
-        await db.prepare("DELETE FROM schedules WHERE group_id = ?").bind(groupId).run();
+        statements.push(db.prepare("DELETE FROM schedules WHERE group_id = ?").bind(groupId));
+        if (statements.length >= 50) {
+            await db.batch(statements);
+            statements.length = 0;
+        }
     }
 
     for (const card of data.cards) {
@@ -296,19 +286,26 @@ export async function importAscToD1(
 
         if (!teacherId || !subjectId) continue;
 
-        // A card may apply to multiple classes
         for (const classXmlId of card.class_ids) {
             const groupId = classIdMap.get(classXmlId);
             if (!groupId) continue;
 
             const classroom = card.classroom_ids[0] || null;
 
-            await db
-                .prepare("INSERT INTO schedules (group_id, subject_id, teacher_id, day, period_num, classroom) VALUES (?, ?, ?, ?, ?, ?)")
-                .bind(groupId, subjectId, teacherId, card.day, card.period, classroom)
-                .run();
+            statements.push(
+                db.prepare("INSERT INTO schedules (group_id, subject_id, teacher_id, day, period_num, classroom) VALUES (?, ?, ?, ?, ?, ?)").bind(groupId, subjectId, teacherId, card.day, card.period, classroom)
+            );
             schedulesCreated++;
+
+            if (statements.length >= 100) {
+                await db.batch(statements);
+                statements.length = 0;
+            }
         }
+    }
+
+    if (statements.length > 0) {
+        await db.batch(statements);
     }
 
     return { teachersUpserted, subjectsUpserted, groupsCreated, schedulesCreated };

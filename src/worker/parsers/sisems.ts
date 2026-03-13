@@ -143,6 +143,7 @@ export async function importSisemsToD1(
     let studentsUpserted = 0;
     let gradesImported = 0;
     const groupsCreated: string[] = [];
+    const statements: any[] = [];
 
     // Track groups to create
     const uniqueGroups = new Map<string, { semester: number; career: string }>();
@@ -152,134 +153,136 @@ export async function importSisemsToD1(
         }
     }
 
-    // Create/get groups
+    // Since we need IDs for relations, we have to do some sequential lookups/inserts
+    // For groups:
     const groupIdMap = new Map<string, number>();
     for (const [groupName, info] of uniqueGroups) {
-        // Find specialty
         let specialtyId: number | null = null;
         const careerUpper = info.career.toUpperCase();
-        if (careerUpper.includes("ACUACULTURA")) {
+        if (careerUpper.includes("ACUA")) {
             const sp = await db.prepare("SELECT id FROM specialties WHERE code = 'ACUA'").first<{ id: number }>();
             if (sp) specialtyId = sp.id;
-        } else if (careerUpper.includes("PRODUCCIÓN INDUSTRIAL") || careerUpper.includes("PRODUCCION INDUSTRIAL")) {
+        } else if (careerUpper.includes("PIA") || careerUpper.includes("PRODUCCIÓN INDUSTRIAL") || careerUpper.includes("PRODUCCION INDUSTRIAL")) {
             const sp = await db.prepare("SELECT id FROM specialties WHERE code = 'PIA'").first<{ id: number }>();
             if (sp) specialtyId = sp.id;
-        } else if (careerUpper.includes("RESPONSABILIDAD SOCIAL")) {
+        } else if (careerUpper.includes("RSIA") || careerUpper.includes("RESPONSABILIDAD SOCIAL")) {
             const sp = await db.prepare("SELECT id FROM specialties WHERE code = 'RSIA'").first<{ id: number }>();
             if (sp) specialtyId = sp.id;
         }
 
-        // Upsert group
-        const existing = await db
-            .prepare("SELECT id FROM groups_table WHERE period_id = ? AND name = ?")
-            .bind(periodId, groupName)
-            .first<{ id: number }>();
-
+        const existing = await db.prepare("SELECT id FROM groups_table WHERE period_id = ? AND name = ?").bind(periodId, groupName).first<{ id: number }>();
         if (existing) {
             groupIdMap.set(groupName, existing.id);
         } else {
-            const result = await db
-                .prepare("INSERT INTO groups_table (period_id, name, semester, specialty_id) VALUES (?, ?, ?, ?)")
-                .bind(periodId, groupName, info.semester, specialtyId)
-                .run();
+            const result = await db.prepare("INSERT INTO groups_table (period_id, name, semester, specialty_id) VALUES (?, ?, ?, ?)").bind(periodId, groupName, info.semester, specialtyId).run();
             const newId = result.meta.last_row_id as number;
             groupIdMap.set(groupName, newId);
             groupsCreated.push(groupName);
         }
     }
 
-    // Upsert students
+    // Upsert students (doing this sequentially because we need their IDs for group_students and grades)
+    // To speed this up slightly and avoid limits, we can batch lookups if possible, but D1 driver requires sequential for last_row_id.
+    // Instead, let's process students in chunks
     for (const s of data.students) {
-        const existing = await db
-            .prepare("SELECT id FROM students WHERE no_control = ?")
-            .bind(s.no_control)
-            .first<{ id: number }>();
-
+        const existing = await db.prepare("SELECT id FROM students WHERE no_control = ?").bind(s.no_control).first<{ id: number }>();
         let studentId: number;
+        
         if (existing) {
-            await db
-                .prepare(`UPDATE students SET curp=?, name=?, paterno=?, materno=?, career=?, generation=?, semester=?, grupo=?, active=1 WHERE id=?`)
-                .bind(s.curp, s.name, s.paterno, s.materno, s.career, s.generation, s.semester, s.grupo, existing.id)
-                .run();
+            statements.push(
+                db.prepare(`UPDATE students SET curp=?, name=?, paterno=?, materno=?, career=?, generation=?, semester=?, grupo=?, active=1 WHERE id=?`)
+                  .bind(s.curp, s.name, s.paterno, s.materno, s.career, s.generation, s.semester, s.grupo, existing.id)
+            );
             studentId = existing.id;
         } else {
-            const result = await db
-                .prepare(`INSERT INTO students (no_control, curp, name, paterno, materno, career, generation, semester, grupo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .bind(s.no_control, s.curp, s.name, s.paterno, s.materno, s.career, s.generation, s.semester, s.grupo)
-                .run();
+            // We have to run the insert immediately to get the ID for relations
+            const result = await db.prepare(`INSERT INTO students (no_control, curp, name, paterno, materno, career, generation, semester, grupo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .bind(s.no_control, s.curp, s.name, s.paterno, s.materno, s.career, s.generation, s.semester, s.grupo).run();
             studentId = result.meta.last_row_id as number;
         }
         studentsUpserted++;
 
-        // Link student to group
         const groupId = groupIdMap.get(s.grupo);
         if (groupId) {
-            await db
-                .prepare("INSERT OR IGNORE INTO group_students (group_id, student_id) VALUES (?, ?)")
-                .bind(groupId, studentId)
-                .run();
+            statements.push(
+                db.prepare("INSERT OR IGNORE INTO group_students (group_id, student_id) VALUES (?, ?)").bind(groupId, studentId)
+            );
         }
+
+        // Execute batch if it gets too large (> 50 statements)
+        if (statements.length >= 50) {
+            await db.batch(statements);
+            statements.length = 0; // clear
+        }
+    }
+
+    // Execute remaining student statements
+    if (statements.length > 0) {
+        await db.batch(statements);
+        statements.length = 0;
+    }
+
+    // Pre-fetch all students to a map for grades
+    const allStudents = await db.prepare("SELECT id, no_control FROM students").all<{id: number, no_control: string}>();
+    const studentIdMap = new Map(allStudents.results.map(s => [s.no_control, s.id]));
+
+    // Pre-fetch all subjects
+    const allSubjects = await db.prepare("SELECT id, name, short_code FROM subjects").all<{id: number, name: string, short_code: string}>();
+    const subjectSysMap = new Map<string, number>();
+    for (const s of allSubjects.results) {
+        subjectSysMap.set(s.name.toUpperCase(), s.id);
+        subjectSysMap.set(s.short_code.toUpperCase(), s.id);
     }
 
     // Import grades
     if (data.type === "grades") {
+        // Fetch existing grades for this period once to avoid querying in loop
+        const existingGradesForPeriod = await db.prepare("SELECT id, student_id, subject_id FROM grades WHERE period_id = ?").bind(periodId).all<{id: number, student_id: number, subject_id: number}>();
+        const gradeMap = new Map<string, number>();
+        for (const eg of existingGradesForPeriod.results) {
+            gradeMap.set(`${eg.student_id}-${eg.subject_id}`, eg.id);
+        }
+
         for (const g of data.grades) {
-            const student = await db
-                .prepare("SELECT id FROM students WHERE no_control = ?")
-                .bind(g.no_control)
-                .first<{ id: number }>();
+            const studentId = studentIdMap.get(g.no_control);
+            if (!studentId) continue;
 
-            if (!student) continue;
-
-            // Find or create subject based on name
             let subjectId: number | null = null;
             if (g.subject_name) {
-                const subject = await db
-                    .prepare("SELECT id FROM subjects WHERE name = ? COLLATE NOCASE OR short_code = ? COLLATE NOCASE")
-                    .bind(g.subject_name, g.subject_name)
-                    .first<{ id: number }>();
+                const searchName = g.subject_name.toUpperCase();
+                subjectId = subjectSysMap.get(searchName) || null;
                 
-                if (subject) {
-                    subjectId = subject.id;
-                } else {
-                    // Create basic subject record if it doesn't exist
-                    const newSub = await db
-                        .prepare("INSERT INTO subjects (name, short_code) VALUES (?, ?)")
-                        .bind(g.subject_name, g.subject_name.substring(0, 10))
-                        .run();
+                if (!subjectId) {
+                    const newSub = await db.prepare("INSERT INTO subjects (name, short_code) VALUES (?, ?)").bind(g.subject_name, g.subject_name.substring(0, 10)).run();
                     subjectId = newSub.meta.last_row_id as number;
+                    subjectSysMap.set(searchName, subjectId);
                 }
             }
 
-            // Check if grade already exists for this student+period+subject
-            const existingGrade = await db
-                .prepare("SELECT id FROM grades WHERE student_id = ? AND period_id = ? AND (subject_id = ? OR subject_id IS NULL)")
-                .bind(student.id, periodId, subjectId)
-                .first<{ id: number }>();
+            const existingGradeId = gradeMap.get(`${studentId}-${subjectId}`);
 
-            if (existingGrade) {
-                await db
-                    .prepare(`
-                        UPDATE grades SET 
-                            partial_1=?, partial_2=?, partial_3=?, 
-                            final_score=?, acred_type=?, subject_id=? 
-                        WHERE id=?
-                    `)
-                    .bind(g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type, subjectId, existingGrade.id)
-                    .run();
+            if (existingGradeId) {
+                statements.push(
+                    db.prepare(`UPDATE grades SET partial_1=?, partial_2=?, partial_3=?, final_score=?, acred_type=? WHERE id=?`)
+                      .bind(g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type, existingGradeId)
+                );
             } else {
-                await db
-                    .prepare(`
-                        INSERT INTO grades (
-                            student_id, period_id, subject_id, 
-                            partial_1, partial_2, partial_3, 
-                            final_score, acred_type, source
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sisems')
-                    `)
-                    .bind(student.id, periodId, subjectId, g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type)
-                    .run();
+                statements.push(
+                    db.prepare(`INSERT INTO grades (student_id, period_id, subject_id, partial_1, partial_2, partial_3, final_score, acred_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sisems')`)
+                      .bind(studentId, periodId, subjectId, g.partial_1, g.partial_2, g.partial_3, g.final_score, g.acred_type)
+                );
             }
             gradesImported++;
+
+            if (statements.length >= 100) {
+                await db.batch(statements);
+                statements.length = 0;
+            }
+        }
+        
+        if (statements.length > 0) {
+            await db.batch(statements);
+            statements.length = 0;
         }
     }
 

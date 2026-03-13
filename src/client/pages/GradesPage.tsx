@@ -90,7 +90,7 @@ export function GradesPage() {
             const headers = { Authorization: `Bearer ${token}` };
 
             const [periodsRes, groupsRes] = await Promise.all([
-                fetch("/api/catalogs/periods", { headers }),
+                fetch("/api/import/periods", { headers }),
                 fetch("/api/catalogs/groups", { headers })
             ]);
 
