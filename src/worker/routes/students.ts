@@ -53,6 +53,26 @@ function buildDownloadUrl(fileKey: string) {
     return `/api/documents/download?key=${encodeURIComponent(fileKey)}`;
 }
 
+type ConductSchemaInfo = {
+    hasReportType: boolean;
+    hasLegacyType: boolean;
+    hasCreatedAt: boolean;
+};
+
+async function getConductSchemaInfo(db: D1Database): Promise<ConductSchemaInfo> {
+    const result = await db.prepare("PRAGMA table_info(conduct_reports)").all<{
+        name: string;
+    }>();
+
+    const columnNames = new Set((result.results ?? []).map((column) => column.name));
+
+    return {
+        hasReportType: columnNames.has("report_type"),
+        hasLegacyType: columnNames.has("type"),
+        hasCreatedAt: columnNames.has("created_at"),
+    };
+}
+
 // ── GET /api/students ──
 students.get("/", requireAuth, async (c) => {
     const db = c.env.DB;
@@ -109,56 +129,82 @@ students.get("/:id/profile", requireAuth, async (c) => {
     const id = c.req.param("id");
     const db = c.env.DB;
 
-    const student = await db.prepare("SELECT * FROM students WHERE id = ? AND active = 1").bind(id).first();
-    if (!student) return c.json({ success: false, error: "Alumno no encontrado" }, 404);
+    try {
+        const student = await db.prepare("SELECT * FROM students WHERE id = ? AND active = 1").bind(id).first();
+        if (!student) return c.json({ success: false, error: "Alumno no encontrado" }, 404);
 
-    const guardiansResult = await db
-        .prepare("SELECT * FROM guardians WHERE student_id = ? ORDER BY id ASC")
-        .bind(id)
-        .all();
+        const guardiansResult = await db
+            .prepare("SELECT * FROM guardians WHERE student_id = ? ORDER BY id ASC")
+            .bind(id)
+            .all();
 
-    const documentsResult = await db
-        .prepare("SELECT * FROM student_documents WHERE student_id = ? ORDER BY uploaded_at DESC")
-        .bind(id)
-        .all();
+        const documentsResult = await db
+            .prepare("SELECT * FROM student_documents WHERE student_id = ? ORDER BY uploaded_at DESC")
+            .bind(id)
+            .all();
 
-    const incidentsResult = await db.prepare(`
-        SELECT cr.*, u.name as reported_by_name
-        FROM conduct_reports cr
-        LEFT JOIN users u ON cr.reported_by = u.id
-        WHERE cr.student_id = ?
-        ORDER BY cr.date DESC, cr.created_at DESC
-        LIMIT 5
-    `)
-        .bind(id)
-        .all();
+        const conductSchema = await getConductSchemaInfo(db);
+        const incidentTypeSelect = conductSchema.hasReportType
+            ? "cr.report_type"
+            : conductSchema.hasLegacyType
+                ? `CASE
+                    WHEN cr.type = 'warning' THEN 'amonestacion'
+                    WHEN cr.type = 'note' THEN 'nota'
+                    ELSE cr.type
+                  END`
+                : "'nota'";
+        const incidentOrderBy = conductSchema.hasCreatedAt
+            ? "cr.date DESC, cr.created_at DESC"
+            : "cr.date DESC, cr.id DESC";
 
-    const documents = documentsResult.results as StudentDocumentRow[];
-    const uploadedDocumentTypes = new Set(
-        documents
-            .map((document) => document.document_type)
-            .filter((documentType): documentType is string => Boolean(documentType)),
-    );
+        const incidentsResult = await db.prepare(`
+            SELECT
+                cr.id,
+                cr.student_id,
+                ${incidentTypeSelect} as report_type,
+                cr.description,
+                cr.date,
+                ${conductSchema.hasCreatedAt ? "cr.created_at" : "NULL"} as created_at,
+                u.name as reported_by_name
+            FROM conduct_reports cr
+            LEFT JOIN users u ON cr.reported_by = u.id
+            WHERE cr.student_id = ?
+            ORDER BY ${incidentOrderBy}
+            LIMIT 5
+        `)
+            .bind(id)
+            .all();
 
-    const documentChecklist = requiredDocumentTypes.map((documentType) => ({
-        document_type: documentType,
-        status: uploadedDocumentTypes.has(documentType) ? "uploaded" : "missing",
-    }));
+        const documents = documentsResult.results as StudentDocumentRow[];
+        const uploadedDocumentTypes = new Set(
+            documents
+                .map((document) => document.document_type)
+                .filter((documentType): documentType is string => Boolean(documentType)),
+        );
 
-    return c.json({
-        success: true,
-        data: {
-            student,
-            guardians: guardiansResult.results,
-            documents: documents.map((document) => ({
-                ...document,
-                download_url: buildDownloadUrl(document.file_key),
-                is_primary: document.document_type === "photo" && student.photo_url === buildDownloadUrl(document.file_key),
-            })),
-            recent_incidents: incidentsResult.results,
-            document_checklist: documentChecklist,
-        },
-    });
+        const documentChecklist = requiredDocumentTypes.map((documentType) => ({
+            document_type: documentType,
+            status: uploadedDocumentTypes.has(documentType) ? "uploaded" : "missing",
+        }));
+
+        return c.json({
+            success: true,
+            data: {
+                student,
+                guardians: guardiansResult.results,
+                documents: documents.map((document) => ({
+                    ...document,
+                    download_url: buildDownloadUrl(document.file_key),
+                    is_primary: document.document_type === "photo" && student.photo_url === buildDownloadUrl(document.file_key),
+                })),
+                recent_incidents: incidentsResult.results,
+                document_checklist: documentChecklist,
+            },
+        });
+    } catch (error: any) {
+        console.error("Student profile error:", error);
+        return c.json({ success: false, error: error?.message ?? "No se pudo cargar el perfil del alumno" }, 500);
+    }
 });
 
 students.post("/:id/guardians", requireAuth, zValidator("json", guardianSchema), async (c) => {
