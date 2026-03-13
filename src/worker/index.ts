@@ -36,5 +36,21 @@ app.route("/api/users", usersRoutes);
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
 
+app.notFound(async (c) => {
+    const url = new URL(c.req.url);
+
+    if (url.pathname.startsWith("/api/")) {
+        return c.json({ success: false, error: "Ruta no encontrada" }, 404);
+    }
+
+    const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+    if (assetResponse.status !== 404) {
+        return assetResponse;
+    }
+
+    url.pathname = "/index.html";
+    return c.env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+});
+
 export default app;
 
