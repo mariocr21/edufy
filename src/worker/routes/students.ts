@@ -20,6 +20,16 @@ const studentSchema = z.object({
     nss: z.string().optional().nullable(),
 });
 
+const guardianSchema = z.object({
+    name: z.string().trim().min(1),
+    relationship: z.string().trim().min(1),
+    phone: z.string().trim().min(1),
+    phone_alt: z.string().trim().optional(),
+    email: z.string().trim().email().optional().or(z.literal("")),
+});
+
+const guardianUpdateSchema = guardianSchema.partial();
+
 const requiredDocumentTypes = [
     "photo",
     "acta_nacimiento",
@@ -130,6 +140,82 @@ students.get("/:id/profile", requireAuth, async (c) => {
             document_checklist: documentChecklist,
         },
     });
+});
+
+students.post("/:id/guardians", requireAuth, zValidator("json", guardianSchema), async (c) => {
+    const studentId = c.req.param("id");
+    const body = c.req.valid("json");
+    const db = c.env.DB;
+
+    const student = await db.prepare("SELECT id FROM students WHERE id = ? AND active = 1").bind(studentId).first();
+    if (!student) return c.json({ success: false, error: "Alumno no encontrado" }, 404);
+
+    const result = await db.prepare(`
+        INSERT INTO guardians (student_id, name, relationship, phone, phone_alt, email)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `)
+        .bind(
+            studentId,
+            body.name,
+            body.relationship,
+            body.phone,
+            body.phone_alt || null,
+            body.email || null,
+        )
+        .run();
+
+    return c.json({ success: true, data: { id: result.meta.last_row_id } }, 201);
+});
+
+students.put("/:id/guardians/:guardianId", requireAuth, zValidator("json", guardianUpdateSchema), async (c) => {
+    const studentId = c.req.param("id");
+    const guardianId = c.req.param("guardianId");
+    const body = c.req.valid("json");
+    const db = c.env.DB;
+
+    const guardian = await db
+        .prepare("SELECT id FROM guardians WHERE id = ? AND student_id = ?")
+        .bind(guardianId, studentId)
+        .first();
+
+    if (!guardian) return c.json({ success: false, error: "Tutor no encontrado" }, 404);
+
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    for (const [key, value] of Object.entries(body)) {
+        if (value !== undefined) {
+            fields.push(`${key} = ?`);
+            values.push(value === "" ? null : value);
+        }
+    }
+
+    if (fields.length === 0) return c.json({ success: false, error: "Sin campos para actualizar" }, 400);
+
+    values.push(guardianId, studentId);
+    await db
+        .prepare(`UPDATE guardians SET ${fields.join(", ")} WHERE id = ? AND student_id = ?`)
+        .bind(...values)
+        .run();
+
+    return c.json({ success: true });
+});
+
+students.delete("/:id/guardians/:guardianId", requireAuth, async (c) => {
+    const studentId = c.req.param("id");
+    const guardianId = c.req.param("guardianId");
+    const db = c.env.DB;
+
+    const result = await db
+        .prepare("DELETE FROM guardians WHERE id = ? AND student_id = ?")
+        .bind(guardianId, studentId)
+        .run();
+
+    if (result.meta.changes === 0) {
+        return c.json({ success: false, error: "Tutor no encontrado" }, 404);
+    }
+
+    return c.json({ success: true });
 });
 
 students.get("/:id", requireAuth, async (c) => {
