@@ -1,58 +1,82 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-    Search,
-    Plus,
-    Edit3,
-    Trash2,
-    X,
-    Users,
-    Filter,
     ChevronDown,
-    Phone,
-    MessageSquare,
+    Download,
+    Edit3,
+    Eye,
     FileText,
+    Filter,
+    Phone,
+    Plus,
+    Search,
+    Trash2,
     Upload,
-    Download
+    Users,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { useAuthStore } from "../stores/authStore";
+import { StudentProfileCard } from "../components/students/StudentProfileCard";
+import { StudentProfileChecklist } from "../components/students/StudentProfileChecklist";
+import { StudentProfileSections } from "../components/students/StudentProfileSections";
+import type { StudentDocument, StudentGuardian, StudentListItem, StudentProfileData } from "../components/students/types";
 
-interface Student {
-    id: number;
-    no_control: string;
-    curp: string;
-    name: string;
-    paterno: string;
-    materno: string;
-    career: string;
-    generation: string;
-    semester: number;
-    grupo: string;
-    blood_type: string | null;
-    nss: string | null;
-    primary_phone?: string;
-    guardian_name?: string;
-}
+type StudentForm = Omit<StudentListItem, "id" | "primary_phone" | "guardian_name" | "photo_url">;
+type DetailTab = "resumen" | "datos" | "tutores" | "expediente";
+type PanelMode = "idle" | "create" | "view";
 
-type StudentForm = Omit<Student, "id" | "primary_phone" | "guardian_name">;
+const emptyStudentForm: StudentForm = {
+    no_control: "",
+    curp: "",
+    name: "",
+    paterno: "",
+    materno: "",
+    career: "",
+    generation: "",
+    semester: 0,
+    grupo: "",
+    blood_type: null,
+    nss: null,
+};
 
-const emptyForm: StudentForm = {
-    no_control: "", curp: "", name: "", paterno: "", materno: "",
-    career: "", generation: "", semester: 0, grupo: "",
-    blood_type: null, nss: null,
+const emptyGuardianForm = {
+    name: "",
+    relationship: "",
+    phone: "",
+    phone_alt: "",
+    email: "",
+};
+
+const docTypeLabels: Record<string, string> = {
+    acta_nacimiento: "Acta de nacimiento",
+    curp: "CURP",
+    certificado_secundaria: "Certificado de secundaria",
+    comprobante_domicilio: "Comprobante de domicilio",
+    photo: "Fotografia",
+    other: "Otro",
 };
 
 export function StudentsPage() {
-    const [students, setStudents] = useState<Student[]>([]);
+    const [students, setStudents] = useState<StudentListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [filterGrupo, setFilterGrupo] = useState("");
     const [filterCareer, setFilterCareer] = useState("");
-    const [showModal, setShowModal] = useState(false);
-    const [editingId, setEditingId] = useState<number | null>(null);
-    const [form, setForm] = useState<StudentForm>(emptyForm);
-    const [saving, setSaving] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
-    const [activeTab, setActiveTab] = useState<"info" | "docs">("info");
+    const [panelMode, setPanelMode] = useState<PanelMode>("idle");
+    const [activeTab, setActiveTab] = useState<DetailTab>("resumen");
+    const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+    const [profile, setProfile] = useState<StudentProfileData | null>(null);
+    const [profileLoading, setProfileLoading] = useState(false);
+    const [profileError, setProfileError] = useState<string | null>(null);
+    const [form, setForm] = useState<StudentForm>(emptyStudentForm);
+    const [savingStudent, setSavingStudent] = useState(false);
+    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [guardianForm, setGuardianForm] = useState(emptyGuardianForm);
+    const [editingGuardianId, setEditingGuardianId] = useState<number | null>(null);
+    const [guardianSaving, setGuardianSaving] = useState(false);
+    const [docType, setDocType] = useState("acta_nacimiento");
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [uploadingDocument, setUploadingDocument] = useState(false);
 
     const fetchStudents = useCallback(async () => {
         setLoading(true);
@@ -61,391 +85,662 @@ export function StudentsPage() {
         if (filterGrupo) params.set("grupo", filterGrupo);
         if (filterCareer) params.set("career", filterCareer);
 
-        const q = params.toString();
-        const res = await api.get<Student[]>(`/students${q ? `?${q}` : ""}`);
-        if (res.success && res.data) setStudents(res.data);
+        const query = params.toString();
+        const response = await api.get<StudentListItem[]>(`/students${query ? `?${query}` : ""}`);
+        if (response.success && response.data) setStudents(response.data);
         setLoading(false);
-    }, [search, filterGrupo, filterCareer]);
+    }, [filterCareer, filterGrupo, search]);
 
-    useEffect(() => { fetchStudents(); }, [fetchStudents]);
+    const syncFormFromStudent = useCallback((student: StudentListItem) => {
+        setForm({
+            no_control: student.no_control,
+            curp: student.curp,
+            name: student.name,
+            paterno: student.paterno,
+            materno: student.materno,
+            career: student.career,
+            generation: student.generation,
+            semester: student.semester,
+            grupo: student.grupo,
+            blood_type: student.blood_type,
+            nss: student.nss,
+        });
+    }, []);
 
-    const grupos = [...new Set(students.map((s) => s.grupo))].sort();
-    const careers = [...new Set(students.map((s) => s.career))].filter(Boolean).sort();
-
-    const openCreate = () => { setEditingId(null); setForm(emptyForm); setActiveTab("info"); setShowModal(true); };
-    const openEdit = (s: Student) => {
-        setEditingId(s.id);
-        setForm({ no_control: s.no_control, curp: s.curp, name: s.name, paterno: s.paterno, materno: s.materno, career: s.career, generation: s.generation, semester: s.semester, grupo: s.grupo, blood_type: s.blood_type, nss: s.nss });
-        setActiveTab("info");
-        setShowModal(true);
-    };
-
-    const handleSave = async () => {
-        setSaving(true);
-        if (editingId) {
-            await api.put(`/students/${editingId}`, form);
+    const loadProfile = useCallback(async (studentId: number) => {
+        setProfileLoading(true);
+        setProfileError(null);
+        const response = await api.get<StudentProfileData>(`/students/${studentId}/profile`);
+        if (response.success && response.data) {
+            setProfile(response.data);
+            syncFormFromStudent(response.data.student);
         } else {
-            await api.post("/students", form);
+            setProfile(null);
+            setProfileError(response.error ?? "No se pudo cargar la ficha del alumno.");
         }
-        setSaving(false);
-        setShowModal(false);
-        fetchStudents();
+        setProfileLoading(false);
+    }, [syncFormFromStudent]);
+
+    useEffect(() => {
+        void fetchStudents();
+    }, [fetchStudents]);
+
+    useEffect(() => {
+        if (panelMode === "view" && selectedStudentId) {
+            void loadProfile(selectedStudentId);
+        }
+    }, [loadProfile, panelMode, selectedStudentId]);
+
+    const grupos = [...new Set(students.map((student) => student.grupo))].filter(Boolean).sort();
+    const careers = [...new Set(students.map((student) => student.career))].filter(Boolean).sort();
+
+    const openCreate = () => {
+        setPanelMode("create");
+        setSelectedStudentId(null);
+        setProfile(null);
+        setProfileError(null);
+        setActiveTab("datos");
+        setForm(emptyStudentForm);
+        setGuardianForm(emptyGuardianForm);
+        setEditingGuardianId(null);
+        setSelectedFile(null);
+        setFeedback(null);
     };
 
-    const handleDelete = async (id: number) => {
-        if (!confirm("¿Estás seguro de dar de baja a este alumno?")) return;
-        await api.delete(`/students/${id}`);
-        fetchStudents();
+    const openProfile = (student: StudentListItem, tab: DetailTab = "resumen") => {
+        setPanelMode("view");
+        setSelectedStudentId(student.id);
+        setActiveTab(tab);
+        setProfile((current) => (current?.student.id === student.id ? current : null));
+        setFeedback(null);
+        syncFormFromStudent(student);
+    };
+
+    const resetGuardianForm = () => {
+        setEditingGuardianId(null);
+        setGuardianForm(emptyGuardianForm);
+    };
+
+    const startGuardianEdit = (guardian: StudentGuardian) => {
+        setEditingGuardianId(guardian.id);
+        setGuardianForm({
+            name: guardian.name,
+            relationship: guardian.relationship,
+            phone: guardian.phone,
+            phone_alt: guardian.phone_alt ?? "",
+            email: guardian.email ?? "",
+        });
+    };
+
+    const handleSaveStudent = async () => {
+        setSavingStudent(true);
+        setFeedback(null);
+
+        let createdId: number | undefined;
+        const response = panelMode === "create"
+            ? await api.post<{ id: number }>("/students", form)
+            : await api.put(`/students/${selectedStudentId}`, form);
+
+        if (!response.success) {
+            setFeedback({ type: "error", text: response.error ?? "No se pudo guardar el alumno." });
+            setSavingStudent(false);
+            return;
+        }
+
+        if (panelMode === "create") {
+            createdId = (response.data as { id?: number } | undefined)?.id;
+        }
+
+        await fetchStudents();
+
+        if (panelMode === "create") {
+            if (createdId) {
+                setPanelMode("view");
+                setSelectedStudentId(createdId);
+                setActiveTab("resumen");
+                await loadProfile(createdId);
+            }
+            setFeedback({ type: "success", text: "Alumno creado correctamente." });
+        } else if (selectedStudentId) {
+            await loadProfile(selectedStudentId);
+            setFeedback({ type: "success", text: "Alumno actualizado correctamente." });
+        }
+
+        setSavingStudent(false);
+    };
+
+    const handleGuardianSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!selectedStudentId) return;
+
+        setGuardianSaving(true);
+        setFeedback(null);
+
+        const payload = {
+            ...guardianForm,
+            phone_alt: guardianForm.phone_alt || undefined,
+            email: guardianForm.email || undefined,
+        };
+
+        const response = editingGuardianId
+            ? await api.put(`/students/${selectedStudentId}/guardians/${editingGuardianId}`, payload)
+            : await api.post(`/students/${selectedStudentId}/guardians`, payload);
+
+        if (!response.success) {
+            setFeedback({ type: "error", text: response.error ?? "No se pudo guardar el tutor." });
+            setGuardianSaving(false);
+            return;
+        }
+
+        await loadProfile(selectedStudentId);
+        setGuardianSaving(false);
+        resetGuardianForm();
+        setFeedback({ type: "success", text: editingGuardianId ? "Tutor actualizado correctamente." : "Tutor agregado correctamente." });
+    };
+
+    const handleDeleteGuardian = async (guardianId: number) => {
+        if (!selectedStudentId) return;
+
+        const response = await api.delete(`/students/${selectedStudentId}/guardians/${guardianId}`);
+        if (!response.success) {
+            setFeedback({ type: "error", text: response.error ?? "No se pudo eliminar el tutor." });
+            return;
+        }
+
+        await loadProfile(selectedStudentId);
+        if (editingGuardianId === guardianId) resetGuardianForm();
+        setFeedback({ type: "success", text: "Tutor eliminado correctamente." });
+    };
+
+    const handleDocumentUpload = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!selectedStudentId || !selectedFile) return;
+
+        setUploadingDocument(true);
+        setFeedback(null);
+
+        try {
+            const token = useAuthStore.getState().token;
+            const formData = new FormData();
+            formData.append("file", selectedFile);
+            formData.append("student_id", String(selectedStudentId));
+            formData.append("document_type", docType);
+
+            const response = await fetch("/api/documents/upload", {
+                method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                body: formData,
+            });
+            const data = await response.json() as { success: boolean; error?: string };
+
+            if (!data.success) {
+                setFeedback({ type: "error", text: data.error ?? "No se pudo subir el documento." });
+                setUploadingDocument(false);
+                return;
+            }
+
+            setSelectedFile(null);
+            await Promise.all([fetchStudents(), loadProfile(selectedStudentId)]);
+            setFeedback({ type: "success", text: "Documento cargado correctamente." });
+        } catch {
+            setFeedback({ type: "error", text: "No se pudo subir el documento." });
+        } finally {
+            setUploadingDocument(false);
+        }
+    };
+
+    const handleDeleteDocument = async (documentId: number) => {
+        if (!selectedStudentId) return;
+
+        const response = await api.delete(`/documents/${documentId}`);
+        if (!response.success) {
+            setFeedback({ type: "error", text: response.error ?? "No se pudo eliminar el documento." });
+            return;
+        }
+
+        await Promise.all([fetchStudents(), loadProfile(selectedStudentId)]);
+        setFeedback({ type: "success", text: "Documento eliminado correctamente." });
     };
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between">
+        <div className="space-y-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Users className="w-7 h-7 text-brand-500" /> Alumnos
+                    <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
+                        <Users className="h-7 w-7 text-brand-500" />
+                        Alumnos
                     </h1>
-                    <p className="text-gray-500 text-sm mt-0.5">{students.length} registrados</p>
+                    <p className="mt-1 text-sm text-gray-500">{students.length} registrados</p>
                 </div>
                 <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-                    <Plus className="w-4 h-4" /> Nuevo Alumno
+                    <Plus className="h-4 w-4" />
+                    Nuevo alumno
                 </button>
             </div>
 
-            {/* Search + Filters */}
             <div className="card !p-3">
-                <div className="flex gap-2 items-center">
+                <div className="flex gap-2">
                     <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                         <input
                             type="text"
                             placeholder="Buscar por nombre, CURP o No. Control..."
                             className="input-field pl-9 text-sm"
                             value={search}
-                            onChange={(e) => setSearch(e.target.value)}
+                            onChange={(event) => setSearch(event.target.value)}
                         />
                     </div>
                     <button
-                        onClick={() => setShowFilters(!showFilters)}
+                        onClick={() => setShowFilters((value) => !value)}
                         className={`btn-secondary flex items-center gap-1 text-sm ${showFilters ? "bg-brand-50 border-brand-300" : ""}`}
                     >
-                        <Filter className="w-4 h-4" /> Filtros
-                        <ChevronDown className={`w-3 h-3 transition-transform ${showFilters ? "rotate-180" : ""}`} />
+                        <Filter className="h-4 w-4" />
+                        Filtros
+                        <ChevronDown className={`h-3 w-3 transition-transform ${showFilters ? "rotate-180" : ""}`} />
                     </button>
                 </div>
 
                 {showFilters && (
-                    <div className="flex gap-3 mt-3 pt-3 border-t border-gray-100">
-                        <select className="input-field text-sm w-40" value={filterGrupo} onChange={(e) => setFilterGrupo(e.target.value)}>
+                    <div className="mt-3 flex flex-col gap-3 border-t border-gray-100 pt-3 sm:flex-row">
+                        <select className="input-field text-sm sm:w-40" value={filterGrupo} onChange={(event) => setFilterGrupo(event.target.value)}>
                             <option value="">Todos los grupos</option>
-                            {grupos.map((g) => <option key={g} value={g}>{g}</option>)}
+                            {grupos.map((grupo) => <option key={grupo} value={grupo}>{grupo}</option>)}
                         </select>
-                        <select className="input-field text-sm w-56" value={filterCareer} onChange={(e) => setFilterCareer(e.target.value)}>
+                        <select className="input-field text-sm sm:w-56" value={filterCareer} onChange={(event) => setFilterCareer(event.target.value)}>
                             <option value="">Todas las carreras</option>
-                            {careers.map((c) => <option key={c} value={c}>{c}</option>)}
+                            {careers.map((career) => <option key={career} value={career}>{career}</option>)}
                         </select>
                     </div>
                 )}
             </div>
 
-            {/* Table */}
-            <div className="card !p-0 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="bg-gray-50 border-b border-gray-200">
-                                <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3">No. Control</th>
-                                <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3">Nombre</th>
-                                <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3">CURP</th>
-                                <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3">Grupo</th>
-                                <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3">Sem.</th>
-                                <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3">Carrera</th>
-                                <th className="text-right text-xs font-semibold text-gray-500 uppercase px-4 py-3">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {loading ? (
-                                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Cargando...</td></tr>
-                            ) : students.length === 0 ? (
-                                <tr><td colSpan={7} className="text-center py-12 text-gray-400">No hay alumnos. Importa el archivo SISEMS primero.</td></tr>
-                            ) : (
-                                students.map((s) => (
-                                    <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 text-sm font-mono text-brand-700">{s.no_control}</td>
-                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{s.paterno} {s.materno} {s.name}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500 font-mono">{s.curp}</td>
-                                        <td className="px-4 py-3"><span className="badge-success">{s.grupo}</span></td>
-                                        <td className="px-4 py-3 text-sm text-gray-600 text-center">{s.semester}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[180px]">{formatCareer(s.career)}</td>
-                                        <td className="px-4 py-3 text-right">
-                                            <div className="flex items-center justify-end gap-1">
-                                                {s.primary_phone && (
-                                                    <>
-                                                    <a 
-                                                        href={`https://wa.me/52${s.primary_phone.replace(/\D/g, '')}`} 
-                                                        target="_blank" 
-                                                        rel="noopener noreferrer"
-                                                        title={`WhatsApp a Tutor: ${s.guardian_name || ''}`}
-                                                        className="p-1.5 text-green-500 hover:text-green-700 rounded-lg hover:bg-green-50 transition-colors"
-                                                    >
-                                                        <MessageSquare className="w-4 h-4" />
-                                                    </a>
-                                                    <a 
-                                                        href={`tel:${s.primary_phone}`} 
-                                                        title={`Llamar a Tutor: ${s.guardian_name || ''}`}
-                                                        className="p-1.5 text-blue-500 hover:text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
-                                                    >
-                                                        <Phone className="w-4 h-4" />
-                                                    </a>
-                                                    <div className="w-px h-4 bg-gray-200 mx-1"></div>
-                                                    </>
-                                                )}
-                                                <button onClick={() => openEdit(s)} className="p-1.5 text-gray-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition-colors">
-                                                    <Edit3 className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleDelete(s.id)} className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors">
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
+                <div className="card !p-0 overflow-hidden">
+                    <StudentsTable
+                        students={students}
+                        loading={loading}
+                        selectedStudentId={selectedStudentId}
+                        onView={openProfile}
+                    />
+                </div>
+                <div className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+                    {feedback && <FeedbackBanner type={feedback.type} text={feedback.text} />}
+                    {panelMode === "idle" && <EmptyPanel />}
+                    {panelMode === "create" && (
+                        <div className="space-y-4">
+                            <div className="card">
+                                <h2 className="text-lg font-semibold text-gray-900">Alta de alumno</h2>
+                                <p className="mt-1 text-sm text-gray-500">Captura la informacion basica para iniciar el expediente integral.</p>
+                            </div>
+                            <StudentFormCard form={form} onChange={setForm} saving={savingStudent} onSave={() => void handleSaveStudent()} />
+                        </div>
+                    )}
+                    {panelMode === "view" && (
+                        <>
+                            <StudentProfileCard profile={profile} loading={profileLoading} error={profileError} />
+                            <Tabs activeTab={activeTab} onChange={setActiveTab} />
+                            {profile && activeTab === "resumen" && <StudentProfileSections profile={profile} />}
+                            {activeTab === "datos" && (
+                                <StudentFormCard form={form} onChange={setForm} saving={savingStudent} onSave={() => void handleSaveStudent()} />
                             )}
-                        </tbody>
-                    </table>
+                            {profile && activeTab === "tutores" && (
+                                <GuardiansPanel
+                                    guardians={profile.guardians}
+                                    form={guardianForm}
+                                    editingGuardianId={editingGuardianId}
+                                    saving={guardianSaving}
+                                    onFormChange={setGuardianForm}
+                                    onEdit={startGuardianEdit}
+                                    onDelete={(guardianId) => void handleDeleteGuardian(guardianId)}
+                                    onReset={resetGuardianForm}
+                                    onSubmit={(event) => void handleGuardianSubmit(event)}
+                                />
+                            )}
+                            {profile && activeTab === "expediente" && (
+                                <DocumentsPanel
+                                    checklist={profile.document_checklist}
+                                    documents={profile.documents}
+                                    docType={docType}
+                                    file={selectedFile}
+                                    uploading={uploadingDocument}
+                                    onDocTypeChange={setDocType}
+                                    onFileChange={setSelectedFile}
+                                    onUpload={(event) => void handleDocumentUpload(event)}
+                                    onDelete={(documentId) => void handleDeleteDocument(documentId)}
+                                />
+                            )}
+                        </>
+                    )}
                 </div>
             </div>
-
-            {/* Modal */}
-            {showModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                            <h3 className="text-lg font-semibold text-gray-900">
-                                {editingId ? "Editar Alumno" : "Nuevo Alumno"}
-                            </h3>
-                            <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <div className="flex border-b border-gray-100">
-                            <button
-                                onClick={() => setActiveTab("info")}
-                                className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "info" ? "border-brand-500 text-brand-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-                            >
-                                Información
-                            </button>
-                            {editingId && (
-                                <button
-                                    onClick={() => setActiveTab("docs")}
-                                    className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "docs" ? "border-brand-500 text-brand-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-                                >
-                                    Expediente Digital
-                                </button>
-                            )}
-                        </div>
-                        
-                        {activeTab === "info" ? (
-                            <>
-                                <div className="p-5 space-y-4">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <Field label="No. Control" value={form.no_control} onChange={(v) => setForm({ ...form, no_control: v })} required disabled={!!editingId} />
-                                        <Field label="CURP" value={form.curp} onChange={(v) => setForm({ ...form, curp: v })} />
-                                    </div>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <Field label="Nombre(s)" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
-                                        <Field label="Apellido Paterno" value={form.paterno} onChange={(v) => setForm({ ...form, paterno: v })} required />
-                                        <Field label="Apellido Materno" value={form.materno} onChange={(v) => setForm({ ...form, materno: v })} />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <Field label="Grupo" value={form.grupo} onChange={(v) => setForm({ ...form, grupo: v })} />
-                                        <Field label="Semestre" value={String(form.semester)} onChange={(v) => setForm({ ...form, semester: Number(v) || 0 })} type="number" />
-                                    </div>
-                                    <Field label="Carrera" value={form.career} onChange={(v) => setForm({ ...form, career: v })} />
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <Field label="Generación" value={form.generation} onChange={(v) => setForm({ ...form, generation: v })} />
-                                        <Field label="Tipo Sangre" value={form.blood_type ?? ""} onChange={(v) => setForm({ ...form, blood_type: v || null })} />
-                                        <Field label="NSS" value={form.nss ?? ""} onChange={(v) => setForm({ ...form, nss: v || null })} />
-                                    </div>
-                                </div>
-                                <div className="flex justify-end gap-2 p-5 border-t border-gray-100 bg-gray-50/50">
-                                    <button onClick={() => setShowModal(false)} className="btn-secondary">Cancelar</button>
-                                    <button onClick={handleSave} disabled={saving} className="btn-primary">
-                                        {saving ? "Guardando..." : editingId ? "Actualizar" : "Crear"}
-                                    </button>
-                                </div>
-                            </>
-                        ) : (
-                            <StudentDocumentsTab studentId={editingId!} />
-                        )}
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
 
-function Field({ label, value, onChange, type = "text", required, disabled }: {
-    label: string; value: string; onChange: (v: string) => void;
-    type?: string; required?: boolean; disabled?: boolean;
+function StudentsTable({
+    students,
+    loading,
+    selectedStudentId,
+    onView,
+}: {
+    students: StudentListItem[];
+    loading: boolean;
+    selectedStudentId: number | null;
+    onView: (student: StudentListItem, tab?: DetailTab) => void;
 }) {
     return (
-        <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-            <input
-                type={type}
-                className="input-field text-sm"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                required={required}
-                disabled={disabled}
-            />
+        <div className="overflow-x-auto">
+            <table className="w-full">
+                <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">No. Control</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Nombre</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Grupo</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Carrera</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                    {loading ? (
+                        <tr><td colSpan={5} className="py-12 text-center text-gray-400">Cargando alumnos...</td></tr>
+                    ) : students.length === 0 ? (
+                        <tr><td colSpan={5} className="py-12 text-center text-gray-400">No hay alumnos para mostrar.</td></tr>
+                    ) : (
+                        students.map((student) => (
+                            <tr key={student.id} className={`transition-colors hover:bg-gray-50/70 ${selectedStudentId === student.id ? "bg-brand-50/50" : ""}`}>
+                                <td className="px-4 py-3 text-sm font-mono text-brand-700">{student.no_control}</td>
+                                <td className="px-4 py-3">
+                                    <div className="text-sm font-medium text-gray-900">{[student.paterno, student.materno, student.name].filter(Boolean).join(" ")}</div>
+                                    <div className="mt-0.5 text-xs text-gray-500">{student.curp || "Sin CURP"}</div>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-700">{student.grupo || "Sin grupo"}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500">{student.career || "Sin carrera"}</td>
+                                <td className="px-4 py-3">
+                                    <div className="flex items-center justify-end gap-1">
+                                        {student.primary_phone && (
+                                            <a href={`tel:${student.primary_phone}`} className="rounded-lg p-1.5 text-blue-500 transition-colors hover:bg-blue-50 hover:text-blue-700" title="Llamar al tutor">
+                                                <Phone className="h-4 w-4" />
+                                            </a>
+                                        )}
+                                        <button onClick={() => onView(student, "resumen")} className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-brand-50 hover:text-brand-600" title="Ver ficha">
+                                            <Eye className="h-4 w-4" />
+                                        </button>
+                                        <button onClick={() => onView(student, "datos")} className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-brand-50 hover:text-brand-600" title="Editar alumno">
+                                            <Edit3 className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))
+                    )}
+                </tbody>
+            </table>
         </div>
     );
 }
 
-function formatCareer(c: string): string {
-    if (!c) return "";
-    return c
-        .replace("TÉCNICO EN ", "")
-        .replace("COMPONENTE BASICO Y PROPEDEUTICO", "BÁSICO")
-        .replace("COMPONENTE BÁSICO Y PROPEDÉUTICO", "BÁSICO");
-}
-
-function StudentDocumentsTab({ studentId }: { studentId: number }) {
-    const [docs, setDocs] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [uploading, setUploading] = useState(false);
-    const [docType, setDocType] = useState("acta_nacimiento");
-    const [file, setFile] = useState<File | null>(null);
-
-    const loadDocs = useCallback(async () => {
-        setLoading(true);
-        const res = await api.get<any[]>(`/documents/student/${studentId}`);
-        if (res.success && res.data) setDocs(res.data);
-        setLoading(false);
-    }, [studentId]);
-
-    useEffect(() => { loadDocs(); }, [loadDocs]);
-
-    const handleUpload = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!file) return;
-
-        setUploading(true);
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("student_id", String(studentId));
-        formData.append("document_type", docType);
-
-        try {
-            const token = localStorage.getItem("edufy_token") || sessionStorage.getItem("edufy_token");
-            const res = await fetch("/api/documents/upload", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${token}` },
-                body: formData
-            });
-            const data: any = await res.json();
-            if (data.success) {
-                setFile(null);
-                loadDocs(); // reload list
-            } else {
-                alert(data.error || "Error subiendo archivo");
-            }
-        } catch (err) {
-            console.error(err);
-            alert("Error de conexión");
-        } finally {
-            setUploading(false);
-        }
-    };
-
-    const docTypes: Record<string, string> = {
-        acta_nacimiento: "Acta de Nacimiento",
-        curp: "CURP",
-        certificado_secundaria: "Certificado de Secundaria",
-        comprobante_domicilio: "Comprobante de Domicilio",
-        photo: "Fotografía",
-        other: "Otro"
-    };
-
+function Tabs({ activeTab, onChange }: { activeTab: DetailTab; onChange: (tab: DetailTab) => void }) {
     return (
-        <div className="p-5 flex flex-col h-[60vh]">
-            {/* Upload Area */}
-            <form onSubmit={handleUpload} className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 shrink-0">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                    <Upload className="w-4 h-4 mr-2" />
-                    Subir Documento
-                </h4>
-                <div className="flex flex-col sm:flex-row gap-3">
-                    <select 
-                        value={docType} 
-                        onChange={e => setDocType(e.target.value)}
-                        className="input-field text-sm sm:w-1/3"
+        <div className="card !p-2">
+            <div className="grid grid-cols-4 gap-2">
+                {([
+                    ["resumen", "Resumen"],
+                    ["datos", "Datos"],
+                    ["tutores", "Tutores"],
+                    ["expediente", "Expediente"],
+                ] as Array<[DetailTab, string]>).map(([value, label]) => (
+                    <button
+                        key={value}
+                        onClick={() => onChange(value)}
+                        className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors ${activeTab === value ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
                     >
-                        {Object.entries(docTypes).map(([k, v]) => (
-                            <option key={k} value={k}>{v}</option>
-                        ))}
-                    </select>
-                    <input 
-                        type="file" 
-                        onChange={e => setFile(e.target.files?.[0] || null)}
-                        className="flex-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 border border-gray-200 rounded-lg p-1 bg-white"
-                        required
-                    />
-                    <button 
-                        type="submit" 
-                        disabled={!file || uploading}
-                        className="btn-primary py-2 px-4 shrink-0 whitespace-nowrap"
-                    >
-                        {uploading ? "Subiendo..." : "Guardar"}
+                        {label}
                     </button>
-                </div>
-            </form>
-
-            <h4 className="text-sm font-semibold text-gray-700 mb-3 underline underline-offset-4 decoration-gray-200">
-                Archivos Guardados
-            </h4>
-            
-            <div className="flex-1 overflow-y-auto pr-2">
-                {loading ? (
-                    <p className="text-sm text-gray-500 text-center py-8">Cargando...</p>
-                ) : docs.length === 0 ? (
-                    <div className="text-center py-12 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
-                        <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">No hay documentos en el expediente virtual.</p>
-                    </div>
-                ) : (
-                    <ul className="space-y-2">
-                        {docs.map(doc => (
-                            <li key={doc.id} className="flex flex-col sm:flex-row items-center justify-between p-3 bg-white border border-gray-100 shadow-sm rounded-lg hover:border-brand-100 transition-colors">
-                                <div className="flex items-center gap-3 w-full sm:w-auto overflow-hidden">
-                                    <div className="bg-brand-50 p-2 rounded-lg text-brand-600 shrink-0">
-                                        <FileText className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-medium text-gray-900 truncate">{docTypes[doc.document_type] || doc.document_type}</p>
-                                        <p className="text-xs text-gray-500 truncate" title={doc.file_name}>{doc.file_name}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3 mt-2 sm:mt-0 w-full sm:w-auto justify-end shrink-0">
-                                    <span className="text-xs text-gray-400">
-                                        {new Date(doc.uploaded_at).toLocaleDateString()}
-                                    </span>
-                                    <a 
-                                        href={`/api/documents/download/${doc.file_key}`}
-                                        target="_blank" rel="noopener noreferrer"
-                                        className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
-                                        title="Descargar/Ver"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                    </a>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                )}
+                ))}
             </div>
         </div>
+    );
+}
+
+function EmptyPanel() {
+    return <div className="card text-sm text-gray-500">Selecciona un alumno de la lista o crea uno nuevo para abrir la ficha 360.</div>;
+}
+
+function FeedbackBanner({ type, text }: { type: "success" | "error"; text: string }) {
+    return (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>
+            {text}
+        </div>
+    );
+}
+
+function StudentFormCard({
+    form,
+    onChange,
+    saving,
+    onSave,
+}: {
+    form: StudentForm;
+    onChange: (form: StudentForm) => void;
+    saving: boolean;
+    onSave: () => void;
+}) {
+    return (
+        <div className="card">
+            <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="No. Control" value={form.no_control} onChange={(value) => onChange({ ...form, no_control: value })} required />
+                <Field label="CURP" value={form.curp} onChange={(value) => onChange({ ...form, curp: value })} />
+                <Field label="Nombre(s)" value={form.name} onChange={(value) => onChange({ ...form, name: value })} required />
+                <Field label="Apellido paterno" value={form.paterno} onChange={(value) => onChange({ ...form, paterno: value })} required />
+                <Field label="Apellido materno" value={form.materno} onChange={(value) => onChange({ ...form, materno: value })} />
+                <Field label="Grupo" value={form.grupo} onChange={(value) => onChange({ ...form, grupo: value })} />
+                <Field label="Semestre" value={String(form.semester)} onChange={(value) => onChange({ ...form, semester: Number(value) || 0 })} type="number" />
+                <Field label="Generacion" value={form.generation} onChange={(value) => onChange({ ...form, generation: value })} />
+                <div className="sm:col-span-2">
+                    <Field label="Carrera" value={form.career} onChange={(value) => onChange({ ...form, career: value })} />
+                </div>
+                <Field label="Tipo de sangre" value={form.blood_type ?? ""} onChange={(value) => onChange({ ...form, blood_type: value || null })} />
+                <Field label="NSS" value={form.nss ?? ""} onChange={(value) => onChange({ ...form, nss: value || null })} />
+            </div>
+            <div className="mt-5 flex justify-end">
+                <button onClick={onSave} disabled={saving} className="btn-primary">
+                    {saving ? "Guardando..." : "Guardar cambios"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function GuardiansPanel({
+    guardians,
+    form,
+    editingGuardianId,
+    saving,
+    onFormChange,
+    onEdit,
+    onDelete,
+    onReset,
+    onSubmit,
+}: {
+    guardians: StudentGuardian[];
+    form: typeof emptyGuardianForm;
+    editingGuardianId: number | null;
+    saving: boolean;
+    onFormChange: (form: typeof emptyGuardianForm) => void;
+    onEdit: (guardian: StudentGuardian) => void;
+    onDelete: (guardianId: number) => void;
+    onReset: () => void;
+    onSubmit: (event: React.FormEvent) => void;
+}) {
+    return (
+        <div className="space-y-4">
+            <div className="card">
+                <h3 className="text-sm font-semibold text-gray-900">Tutores registrados</h3>
+                <div className="mt-4 space-y-3">
+                    {guardians.length === 0 ? (
+                        <p className="text-sm text-gray-500">No hay tutores registrados.</p>
+                    ) : (
+                        guardians.map((guardian) => (
+                            <div key={guardian.id} className="rounded-xl border border-gray-100 p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-900">{guardian.name}</p>
+                                        <p className="text-xs text-gray-500">{guardian.relationship}</p>
+                                        <p className="mt-2 text-xs text-gray-500">{guardian.phone}</p>
+                                        <p className="text-xs text-gray-500">{guardian.email || "Sin correo"}</p>
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => onEdit(guardian)} className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-brand-50 hover:text-brand-600" title="Editar tutor">
+                                            <Edit3 className="h-4 w-4" />
+                                        </button>
+                                        <button onClick={() => onDelete(guardian.id)} className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600" title="Eliminar tutor">
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            <div className="card">
+                <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-gray-900">{editingGuardianId ? "Editar tutor" : "Agregar tutor"}</h3>
+                    {editingGuardianId && (
+                        <button onClick={onReset} className="text-sm text-gray-500 hover:text-gray-700">
+                            Cancelar edicion
+                        </button>
+                    )}
+                </div>
+                <form onSubmit={onSubmit} className="mt-4 space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <Field label="Nombre" value={form.name} onChange={(value) => onFormChange({ ...form, name: value })} required />
+                        <Field label="Relacion" value={form.relationship} onChange={(value) => onFormChange({ ...form, relationship: value })} required />
+                        <Field label="Telefono" value={form.phone} onChange={(value) => onFormChange({ ...form, phone: value })} required />
+                        <Field label="Telefono alterno" value={form.phone_alt} onChange={(value) => onFormChange({ ...form, phone_alt: value })} />
+                        <div className="sm:col-span-2">
+                            <Field label="Correo" value={form.email} onChange={(value) => onFormChange({ ...form, email: value })} type="email" />
+                        </div>
+                    </div>
+                    <div className="flex justify-end">
+                        <button type="submit" disabled={saving} className="btn-primary">
+                            {saving ? "Guardando..." : editingGuardianId ? "Actualizar tutor" : "Agregar tutor"}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function DocumentsPanel({
+    checklist,
+    documents,
+    docType,
+    file,
+    uploading,
+    onDocTypeChange,
+    onFileChange,
+    onUpload,
+    onDelete,
+}: {
+    checklist: StudentProfileData["document_checklist"];
+    documents: StudentDocument[];
+    docType: string;
+    file: File | null;
+    uploading: boolean;
+    onDocTypeChange: (value: string) => void;
+    onFileChange: (file: File | null) => void;
+    onUpload: (event: React.FormEvent) => void;
+    onDelete: (documentId: number) => void;
+}) {
+    return (
+        <div className="space-y-4">
+            <div className="card">
+                <h3 className="text-sm font-semibold text-gray-900">Checklist documental</h3>
+                <div className="mt-4">
+                    <StudentProfileChecklist items={checklist} />
+                </div>
+            </div>
+
+            <div className="card">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <Upload className="h-4 w-4 text-brand-600" />
+                    Cargar documento
+                </h3>
+                <form onSubmit={onUpload} className="mt-4 space-y-3">
+                    <select value={docType} onChange={(event) => onDocTypeChange(event.target.value)} className="input-field text-sm">
+                        {Object.entries(docTypeLabels).map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                        ))}
+                    </select>
+                    <input
+                        type="file"
+                        onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+                        className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-full file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:font-semibold file:text-brand-700 hover:file:bg-brand-100"
+                        required
+                    />
+                    <div className="flex justify-end">
+                        <button type="submit" disabled={!file || uploading} className="btn-primary">
+                            {uploading ? "Subiendo..." : "Subir documento"}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div className="card">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <FileText className="h-4 w-4 text-brand-600" />
+                    Documentos del expediente
+                </h3>
+                <div className="mt-4 space-y-3">
+                    {documents.length === 0 ? (
+                        <p className="text-sm text-gray-500">No hay documentos cargados.</p>
+                    ) : (
+                        documents.map((document) => (
+                            <div key={document.id} className="rounded-xl border border-gray-100 p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-gray-900">{docTypeLabels[document.document_type] ?? document.document_type}</p>
+                                        <p className="truncate text-xs text-gray-500">{document.file_name}</p>
+                                        {document.is_primary && <p className="mt-1 text-xs font-medium text-brand-700">Foto principal activa</p>}
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <a href={document.download_url} target="_blank" rel="noopener noreferrer" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600" title="Abrir documento">
+                                            <Download className="h-4 w-4" />
+                                        </a>
+                                        <button onClick={() => onDelete(document.id)} className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600" title="Eliminar documento">
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function Field({
+    label,
+    value,
+    onChange,
+    type = "text",
+    required,
+}: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+    type?: string;
+    required?: boolean;
+}) {
+    return (
+        <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-600">{label}</span>
+            <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} className="input-field text-sm" />
+        </label>
     );
 }
