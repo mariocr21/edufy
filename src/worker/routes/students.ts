@@ -38,6 +38,21 @@ const requiredDocumentTypes = [
     "comprobante_domicilio",
 ] as const;
 
+type StudentDocumentRow = {
+    id: number;
+    student_id: number;
+    document_type: string;
+    file_key: string;
+    file_name: string;
+    content_type: string;
+    uploaded_by: number | null;
+    uploaded_at: string;
+};
+
+function buildDownloadUrl(fileKey: string) {
+    return `/api/documents/download?key=${encodeURIComponent(fileKey)}`;
+}
+
 // ── GET /api/students ──
 students.get("/", requireAuth, async (c) => {
     const db = c.env.DB;
@@ -118,7 +133,7 @@ students.get("/:id/profile", requireAuth, async (c) => {
         .bind(id)
         .all();
 
-    const documents = documentsResult.results as Array<{ document_type?: string }>;
+    const documents = documentsResult.results as StudentDocumentRow[];
     const uploadedDocumentTypes = new Set(
         documents
             .map((document) => document.document_type)
@@ -135,7 +150,11 @@ students.get("/:id/profile", requireAuth, async (c) => {
         data: {
             student,
             guardians: guardiansResult.results,
-            documents: documentsResult.results,
+            documents: documents.map((document) => ({
+                ...document,
+                download_url: buildDownloadUrl(document.file_key),
+                is_primary: document.document_type === "photo" && student.photo_url === buildDownloadUrl(document.file_key),
+            })),
             recent_incidents: incidentsResult.results,
             document_checklist: documentChecklist,
         },
