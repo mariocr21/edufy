@@ -20,6 +20,14 @@ const studentSchema = z.object({
     nss: z.string().optional().nullable(),
 });
 
+const requiredDocumentTypes = [
+    "photo",
+    "acta_nacimiento",
+    "curp",
+    "certificado_secundaria",
+    "comprobante_domicilio",
+] as const;
+
 // ── GET /api/students ──
 students.get("/", requireAuth, async (c) => {
     const db = c.env.DB;
@@ -72,6 +80,58 @@ students.get("/stats/summary", requireAuth, async (c) => {
 });
 
 // ── GET /api/students/:id ──
+students.get("/:id/profile", requireAuth, async (c) => {
+    const id = c.req.param("id");
+    const db = c.env.DB;
+
+    const student = await db.prepare("SELECT * FROM students WHERE id = ? AND active = 1").bind(id).first();
+    if (!student) return c.json({ success: false, error: "Alumno no encontrado" }, 404);
+
+    const guardiansResult = await db
+        .prepare("SELECT * FROM guardians WHERE student_id = ? ORDER BY id ASC")
+        .bind(id)
+        .all();
+
+    const documentsResult = await db
+        .prepare("SELECT * FROM student_documents WHERE student_id = ? ORDER BY uploaded_at DESC")
+        .bind(id)
+        .all();
+
+    const incidentsResult = await db.prepare(`
+        SELECT cr.*, u.name as reported_by_name
+        FROM conduct_reports cr
+        LEFT JOIN users u ON cr.reported_by = u.id
+        WHERE cr.student_id = ?
+        ORDER BY cr.date DESC, cr.created_at DESC
+        LIMIT 5
+    `)
+        .bind(id)
+        .all();
+
+    const documents = documentsResult.results as Array<{ document_type?: string }>;
+    const uploadedDocumentTypes = new Set(
+        documents
+            .map((document) => document.document_type)
+            .filter((documentType): documentType is string => Boolean(documentType)),
+    );
+
+    const documentChecklist = requiredDocumentTypes.map((documentType) => ({
+        document_type: documentType,
+        status: uploadedDocumentTypes.has(documentType) ? "uploaded" : "missing",
+    }));
+
+    return c.json({
+        success: true,
+        data: {
+            student,
+            guardians: guardiansResult.results,
+            documents: documentsResult.results,
+            recent_incidents: incidentsResult.results,
+            document_checklist: documentChecklist,
+        },
+    });
+});
+
 students.get("/:id", requireAuth, async (c) => {
     const id = c.req.param("id");
     const db = c.env.DB;
