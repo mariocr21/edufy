@@ -21,6 +21,7 @@ import type { UserRole } from "../../../shared/types";
 
 const navItems: Array<{ to: string; icon: typeof LayoutDashboard; label: string; roles: UserRole[] }> = [
     { to: "/", icon: LayoutDashboard, label: "Dashboard", roles: ["admin", "teacher", "prefect", "student", "parent"] },
+    { to: "/usuarios", icon: Users, label: "Usuarios", roles: ["admin"] },
     { to: "/alumnos", icon: Users, label: "Alumnos", roles: ["admin", "teacher", "prefect"] },
     { to: "/docentes", icon: GraduationCap, label: "Docentes", roles: ["admin"] },
     { to: "/calificaciones", icon: ClipboardList, label: "Calificaciones", roles: ["admin", "teacher"] },

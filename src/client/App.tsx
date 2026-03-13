@@ -4,6 +4,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ImportPage } from "./pages/ImportPage";
 import { StudentsPage } from "./pages/StudentsPage";
+import { UsersPage } from "./pages/UsersPage";
 import { TeachersPage } from "./pages/TeachersPage";
 import { AttendancePage } from "./pages/AttendancePage";
 import { GradesPage } from "./pages/GradesPage";
@@ -47,6 +48,14 @@ export function App() {
                         <AppLayout>
                             <Routes>
                                 <Route path="/" element={<DashboardPage />} />
+                                <Route
+                                    path="/usuarios"
+                                    element={
+                                        <ProtectedRoute allowedRoles={["admin"]}>
+                                            <UsersPage />
+                                        </ProtectedRoute>
+                                    }
+                                />
                                 <Route path="/alumnos" element={<StudentsPage />} />
                                 <Route
                                     path="/docentes"
