@@ -25,8 +25,9 @@ students.get("/", requireAuth, async (c) => {
     const db = c.env.DB;
     const grupo = c.req.query("grupo");
     const semester = c.req.query("semester");
-    const search = c.req.query("search");
+    const search = c.req.query("search") ?? c.req.query("q");
     const career = c.req.query("career");
+    const limit = Number(c.req.query("limit"));
 
     let query = `
         SELECT s.*, 
@@ -46,6 +47,10 @@ students.get("/", requireAuth, async (c) => {
     }
 
     query += " ORDER BY s.paterno, s.materno, s.name";
+    if (Number.isFinite(limit) && limit > 0) {
+        query += " LIMIT ?";
+        params.push(Math.min(limit, 100));
+    }
 
     const stmt = db.prepare(query);
     const result = await (params.length ? stmt.bind(...params) : stmt).all();

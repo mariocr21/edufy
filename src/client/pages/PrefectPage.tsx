@@ -48,6 +48,7 @@ export function PrefectPage() {
     // Modal states
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const [searchingStudents, setSearchingStudents] = useState(false);
     const [students, setStudents] = useState<Student[]>([]);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
     
@@ -62,6 +63,25 @@ export function PrefectPage() {
     useEffect(() => {
         loadRecentReports();
     }, []);
+
+    useEffect(() => {
+        if (!isModalOpen || selectedStudent) {
+            return;
+        }
+
+        const trimmedQuery = searchQuery.trim();
+        if (trimmedQuery.length < 3) {
+            setStudents([]);
+            setSearchingStudents(false);
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            void searchStudents(trimmedQuery);
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [isModalOpen, searchQuery, selectedStudent]);
 
     const loadRecentReports = async () => {
         try {
@@ -84,30 +104,36 @@ export function PrefectPage() {
     const searchStudents = async (query: string) => {
         if (query.length < 3) {
             setStudents([]);
+            setSearchingStudents(false);
             return;
         }
         
         try {
+            setSearchingStudents(true);
             const token = useAuthStore.getState().token;
-            const res = await fetch(`/api/students?q=${encodeURIComponent(query)}&limit=10`, {
+            const params = new URLSearchParams({
+                search: query,
+                limit: "10",
+            });
+            const res = await fetch(`/api/students?${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             const data = await res.json() as { success: boolean; data: Student[] };
             if (data.success) {
                 setStudents(data.data);
+            } else {
+                setStudents([]);
             }
         } catch (error) {
             console.error("Error searching students:", error);
+            setStudents([]);
+        } finally {
+            setSearchingStudents(false);
         }
     };
 
     const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = e.target.value;
-        setSearchQuery(val);
-        
-        // Simple debounce
-        const timeoutId = setTimeout(() => searchStudents(val), 300);
-        return () => clearTimeout(timeoutId);
+        setSearchQuery(e.target.value);
     };
 
     const openModal = () => {
@@ -331,6 +357,11 @@ export function PrefectPage() {
                                                 onChange={handleSearchChange}
                                                 className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                                             />
+                                            {searchingStudents && (
+                                                <div className="mt-2 text-xs text-gray-500">
+                                                    Buscando alumnos...
+                                                </div>
+                                            )}
                                             {students.length > 0 && (
                                                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
                                                     {students.map(s => (
