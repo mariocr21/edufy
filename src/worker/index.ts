@@ -11,6 +11,7 @@ import { conductRoutes } from "./routes/conduct";
 import { credentialsRoutes } from "./routes/credentials";
 import { dashboardRoutes } from "./routes/dashboard";
 import { documentsRoutes } from "./routes/documents";
+import { usersRoutes } from "./routes/users";
 import type { Bindings } from "./bindings";
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -30,9 +31,26 @@ app.route("/api/conduct", conductRoutes);
 app.route("/api/credentials", credentialsRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/documents", documentsRoutes);
+app.route("/api/users", usersRoutes);
 
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
+
+app.notFound(async (c) => {
+    const url = new URL(c.req.url);
+
+    if (url.pathname.startsWith("/api/")) {
+        return c.json({ success: false, error: "Ruta no encontrada" }, 404);
+    }
+
+    const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+    if (assetResponse.status !== 404) {
+        return assetResponse;
+    }
+
+    url.pathname = "/index.html";
+    return c.env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+});
 
 export default app;
 

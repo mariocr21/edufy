@@ -1,21 +1,22 @@
 import { useState, useEffect } from "react";
-import { 
-    Users, 
-    GraduationCap, 
-    Calendar, 
+import {
+    Users,
+    GraduationCap,
+    Calendar,
     TrendingUp,
     AlertTriangle,
-    ShieldAlert
+    ShieldAlert,
+    RefreshCw,
 } from "lucide-react";
-import { 
-    BarChart, 
-    Bar, 
-    XAxis, 
-    YAxis, 
-    CartesianGrid, 
-    Tooltip, 
+import {
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
     ResponsiveContainer,
-    Legend
+    Legend,
 } from "recharts";
 import { useAuthStore } from "../stores/authStore";
 
@@ -29,14 +30,22 @@ interface DashboardData {
     charts: {
         attendanceByGroup: { name: string; asistencia: number }[];
     };
-    recentIncidents: any[];
+    recentIncidents: Array<{
+        id: number;
+        type: "warning" | "suspension" | "note";
+        description: string;
+        date: string;
+        name: string;
+        paterno: string;
+    }>;
     activePeriodName: string;
 }
 
 export function DashboardPage() {
-    const user = useAuthStore(state => state.user);
+    const user = useAuthStore((state) => state.user);
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState<DashboardData | null>(null);
+    const [error, setError] = useState("");
 
     useEffect(() => {
         loadDashboardData();
@@ -44,22 +53,35 @@ export function DashboardPage() {
 
     const loadDashboardData = async () => {
         try {
+            setLoading(true);
+            setError("");
             const token = useAuthStore.getState().token;
             const res = await fetch("/api/dashboard/stats", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
             });
-            const result = await res.json() as { success: boolean, data: DashboardData };
-            if (result.success) {
-                setData(result.data);
+            const result = (await res.json()) as {
+                success: boolean;
+                data?: DashboardData;
+                error?: string;
+            };
+
+            if (!res.ok || !result.success || !result.data) {
+                setError(result.error || "No fue posible cargar el dashboard");
+                setData(null);
+                return;
             }
-        } catch (error) {
-            console.error("Error fetching dashboard data:", error);
+
+            setData(result.data);
+        } catch (fetchError) {
+            console.error("Error fetching dashboard data:", fetchError);
+            setError("Error de conexión al cargar el dashboard");
+            setData(null);
         } finally {
             setLoading(false);
         }
     };
 
-    if (loading || !data) {
+    if (loading) {
         return (
             <div className="flex flex-col items-center justify-center p-20">
                 <div className="w-10 h-10 border-4 border-gray-200 border-t-brand-500 rounded-full animate-spin mb-4" />
@@ -68,15 +90,37 @@ export function DashboardPage() {
         );
     }
 
+    if (error || !data) {
+        return (
+            <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-red-100 shadow-sm p-8">
+                <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
+                        <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div className="flex-1">
+                        <h1 className="text-xl font-bold text-gray-900">No se pudo cargar el dashboard</h1>
+                        <p className="text-gray-600 mt-2">{error || "Ocurrió un problema inesperado."}</p>
+                        <button
+                            onClick={loadDashboardData}
+                            className="mt-4 inline-flex items-center px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+                        >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Reintentar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     const { summary, charts, recentIncidents, activePeriodName } = data;
 
     return (
         <div className="space-y-6 max-w-7xl mx-auto">
-            {/* Header */}
             <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-                        ¡Hola, {user?.display_name?.split(' ')[0]}! 👋
+                        ¡Hola, {user?.display_name?.split(" ")[0]}!
                     </h1>
                     <p className="text-gray-500 mt-1">
                         Resumen general • <span className="font-medium text-brand-600">{activePeriodName}</span>
@@ -85,12 +129,16 @@ export function DashboardPage() {
                 <div className="hidden sm:block">
                     <div className="bg-brand-50 text-brand-700 px-4 py-2 rounded-lg font-medium text-sm flex items-center">
                         <Calendar className="w-4 h-4 mr-2" />
-                        {new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        {new Date().toLocaleDateString("es-MX", {
+                            weekday: "long",
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                        })}
                     </div>
                 </div>
             </div>
 
-            {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
                     <div className="flex items-center justify-between mb-4">
@@ -111,15 +159,13 @@ export function DashboardPage() {
                 <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="font-medium text-gray-500 text-sm">Docentes</h3>
-                        <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+                        <div className="p-2 bg-cyan-50 text-cyan-700 rounded-lg">
                             <GraduationCap className="w-5 h-5" />
                         </div>
                     </div>
                     <div>
                         <p className="text-3xl font-bold text-gray-900">{summary.totalTeachers}</p>
-                        <p className="text-xs text-gray-500 font-medium mt-1">
-                            Plantilla activa
-                        </p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">Plantilla registrada</p>
                     </div>
                 </div>
 
@@ -132,30 +178,35 @@ export function DashboardPage() {
                     </div>
                     <div>
                         <p className="text-3xl font-bold text-gray-900">{summary.totalGroups}</p>
-                        <p className="text-xs text-gray-500 font-medium mt-1">
-                            Grupos formados
-                        </p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">Grupos formados</p>
                     </div>
                 </div>
 
                 <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm transition-transform hover:-translate-y-1 duration-200">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="font-medium text-gray-500 text-sm">Asistencia de Hoy</h3>
-                        <div className={`p-2 rounded-lg ${summary.attendanceRate >= 85 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                            {summary.attendanceRate >= 85 ? <TrendingUp className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+                        <div
+                            className={`p-2 rounded-lg ${
+                                summary.attendanceRate >= 85
+                                    ? "bg-green-50 text-green-600"
+                                    : "bg-red-50 text-red-600"
+                            }`}
+                        >
+                            {summary.attendanceRate >= 85 ? (
+                                <TrendingUp className="w-5 h-5" />
+                            ) : (
+                                <AlertTriangle className="w-5 h-5" />
+                            )}
                         </div>
                     </div>
                     <div>
                         <p className="text-3xl font-bold text-gray-900">{summary.attendanceRate}%</p>
-                        <p className="text-xs text-gray-500 font-medium mt-1">
-                            Basado en pases de lista
-                        </p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">Basado en pases de lista</p>
                     </div>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Main Chart */}
                 <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
                     <h2 className="text-lg font-bold text-gray-900 mb-6">Asistencia por Grupo (Hoy)</h2>
                     <div className="h-72 w-full">
@@ -163,12 +214,9 @@ export function DashboardPage() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={charts.attendanceByGroup} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} dy={10} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} domain={[0, 100]} />
-                                    <Tooltip 
-                                        cursor={{fill: '#F3F4F6'}}
-                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: "#6B7280", fontSize: 12 }} dy={10} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{ fill: "#6B7280", fontSize: 12 }} domain={[0, 100]} />
+                                    <Tooltip cursor={{ fill: "#F3F4F6" }} contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
                                     <Legend />
                                     <Bar dataKey="asistencia" name="% Asistencia" fill="#0284c7" radius={[4, 4, 0, 0]} maxBarSize={50} />
                                 </BarChart>
@@ -182,7 +230,6 @@ export function DashboardPage() {
                     </div>
                 </div>
 
-                {/* Right Column: Incidents & Alerts */}
                 <div className="space-y-6">
                     <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-full">
                         <div className="flex items-center justify-between mb-6">
@@ -191,15 +238,20 @@ export function DashboardPage() {
                                 Últimas Incidencias
                             </h2>
                         </div>
-                        
+
                         <div className="space-y-4">
                             {recentIncidents.length > 0 ? (
                                 recentIncidents.map((incident) => (
                                     <div key={incident.id} className="flex gap-3 pb-4 border-b border-gray-50 last:border-0 last:pb-0">
-                                        <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
-                                            incident.report_type === 'suspension' ? 'bg-red-500' :
-                                            incident.report_type === 'amonestacion' ? 'bg-orange-500' : 'bg-blue-500'
-                                        }`} />
+                                        <div
+                                            className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
+                                                incident.type === "suspension"
+                                                    ? "bg-red-500"
+                                                    : incident.type === "warning"
+                                                    ? "bg-orange-500"
+                                                    : "bg-blue-500"
+                                            }`}
+                                        />
                                         <div>
                                             <p className="text-sm font-medium text-gray-900">
                                                 {incident.name} {incident.paterno}
@@ -211,7 +263,9 @@ export function DashboardPage() {
                                     </div>
                                 ))
                             ) : (
-                                <p className="text-sm text-gray-500 text-center py-4">No hay incidencias reportadas recientemente.</p>
+                                <p className="text-sm text-gray-500 text-center py-4">
+                                    No hay incidencias reportadas recientemente.
+                                </p>
                             )}
                         </div>
                     </div>

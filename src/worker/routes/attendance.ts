@@ -46,8 +46,12 @@ attendance.get("/my-schedule", requireAuth, requireRoles(["teacher", "admin"]), 
     } else {
         const teacher = await db.prepare("SELECT id FROM teachers WHERE user_id = ?").bind(user.id).first<{id: number}>();
         if (!teacher) {
-            // For dev/testing, if no user linked, we can return empty or an error
-            return c.json({ success: false, error: "Docente no encontrado o no vinculado a esta cuenta" }, 404);
+            return c.json({
+                success: true,
+                data: [],
+                needs_setup: true,
+                message: "Tu cuenta docente aún no está vinculada a un registro de maestro. Pide a administración que la vincule en Usuarios y Docentes.",
+            });
         }
         teacherId = teacher.id;
     }
@@ -116,7 +120,7 @@ attendance.post("/batch", requireAuth, requireRoles(["teacher", "admin"]), zVali
             await db.batch(statements);
         }
         return c.json({ success: true, message: `Asistencia guardada (${statements.length} registros)` });
-    } catch (error) {
+    } catch {
         return c.json({ success: false, error: "Error guardando asistencia" }, 500);
     }
 });

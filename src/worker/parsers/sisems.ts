@@ -1,4 +1,3 @@
-import type { Bindings } from "../bindings";
 
 // ── Column mappings for SISEMS files ──
 

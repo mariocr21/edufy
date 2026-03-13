@@ -17,17 +17,19 @@ import {
     Waves,
     ChevronLeft,
 } from "lucide-react";
+import type { UserRole } from "../../../shared/types";
 
-const navItems = [
-    { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-    { to: "/alumnos", icon: Users, label: "Alumnos" },
-    { to: "/docentes", icon: GraduationCap, label: "Docentes" },
-    { to: "/calificaciones", icon: ClipboardList, label: "Calificaciones" },
-    { to: "/asistencia", icon: CalendarCheck, label: "Asistencia" },
-    { to: "/prefectura", icon: ShieldAlert, label: "Prefectura" },
-    { to: "/credenciales", icon: CreditCard, label: "Credenciales" },
-    { to: "/tramites", icon: FileText, label: "Trámites" },
-    { to: "/importar", icon: Upload, label: "Importar Datos" },
+const navItems: Array<{ to: string; icon: typeof LayoutDashboard; label: string; roles: UserRole[] }> = [
+    { to: "/", icon: LayoutDashboard, label: "Dashboard", roles: ["admin", "teacher", "prefect", "student", "parent"] },
+    { to: "/usuarios", icon: Users, label: "Usuarios", roles: ["admin"] },
+    { to: "/alumnos", icon: Users, label: "Alumnos", roles: ["admin", "teacher", "prefect"] },
+    { to: "/docentes", icon: GraduationCap, label: "Docentes", roles: ["admin"] },
+    { to: "/calificaciones", icon: ClipboardList, label: "Calificaciones", roles: ["admin", "teacher"] },
+    { to: "/asistencia", icon: CalendarCheck, label: "Asistencia", roles: ["admin", "teacher", "prefect"] },
+    { to: "/prefectura", icon: ShieldAlert, label: "Prefectura", roles: ["admin", "prefect"] },
+    { to: "/credenciales", icon: CreditCard, label: "Credenciales", roles: ["admin", "prefect"] },
+    { to: "/tramites", icon: FileText, label: "Trámites", roles: ["admin"] },
+    { to: "/importar", icon: Upload, label: "Importar Datos", roles: ["admin"] },
 ];
 
 interface AppLayoutProps {
@@ -54,9 +56,10 @@ export function AppLayout({ children }: AppLayoutProps) {
         parent: "Padre/Tutor",
     };
 
+    const visibleNavItems = navItems.filter((item) => (user ? item.roles.includes(user.role) : false));
+
     return (
         <div className="min-h-screen flex bg-gray-50">
-            {/* Overlay mobile */}
             {sidebarOpen && (
                 <div
                     className="lg:hidden fixed inset-0 bg-black/40 z-40 backdrop-blur-sm"
@@ -64,18 +67,16 @@ export function AppLayout({ children }: AppLayoutProps) {
                 />
             )}
 
-            {/* Sidebar */}
             <aside
                 className={`
-          fixed lg:sticky top-0 left-0 z-50 h-screen
-          bg-white border-r border-gray-200
-          flex flex-col
-          transition-all duration-300 ease-in-out
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-          ${collapsed ? "w-[72px]" : "w-64"}
-        `}
+                    fixed lg:sticky top-0 left-0 z-50 h-screen
+                    bg-white border-r border-gray-200
+                    flex flex-col
+                    transition-all duration-300 ease-in-out
+                    ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+                    ${collapsed ? "w-[72px]" : "w-64"}
+                `}
             >
-                {/* Logo */}
                 <div className={`flex items-center gap-3 p-4 border-b border-gray-100 ${collapsed ? "justify-center" : ""}`}>
                     <div className="w-9 h-9 bg-gradient-to-br from-brand-500 to-ocean-600 rounded-lg flex items-center justify-center flex-shrink-0">
                         <Waves className="w-5 h-5 text-white" />
@@ -94,10 +95,9 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </button>
                 </div>
 
-                {/* Nav */}
                 <nav className="flex-1 py-3 overflow-y-auto">
                     <ul className="space-y-0.5 px-2">
-                        {navItems.map((item) => (
+                        {visibleNavItems.map((item) => (
                             <li key={item.to}>
                                 <NavLink
                                     to={item.to}
@@ -105,12 +105,10 @@ export function AppLayout({ children }: AppLayoutProps) {
                                     onClick={() => setSidebarOpen(false)}
                                     className={({ isActive }) =>
                                         `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150
-                    ${isActive
+                                        ${isActive
                                             ? "bg-brand-50 text-brand-700"
-                                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                                        }
-                    ${collapsed ? "justify-center" : ""}
-                    `
+                                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}
+                                        ${collapsed ? "justify-center" : ""}`
                                     }
                                     title={collapsed ? item.label : undefined}
                                 >
@@ -122,7 +120,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </ul>
                 </nav>
 
-                {/* Collapse toggle (desktop) */}
                 <button
                     onClick={() => setCollapsed(!collapsed)}
                     className="hidden lg:flex items-center justify-center p-2 mx-2 mb-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
@@ -130,7 +127,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                     <ChevronLeft className={`w-4 h-4 transition-transform ${collapsed ? "rotate-180" : ""}`} />
                 </button>
 
-                {/* User */}
                 <div className={`border-t border-gray-100 p-3 ${collapsed ? "px-2" : ""}`}>
                     <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
                         <div className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -155,9 +151,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
             </aside>
 
-            {/* Main Content */}
             <div className="flex-1 flex flex-col min-w-0">
-                {/* Top bar */}
                 <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-gray-200 h-14 flex items-center px-4 lg:px-6">
                     <button
                         onClick={() => setSidebarOpen(true)}
@@ -171,7 +165,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                     </span>
                 </header>
 
-                {/* Page content */}
                 <main className="flex-1 p-4 lg:p-6 overflow-auto">
                     {children}
                 </main>

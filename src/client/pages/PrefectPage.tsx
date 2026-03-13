@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { format, parseISO } from "date-fns";
-import { es } from "date-fns/locale";
 import {
     ShieldAlert,
     Search,
@@ -11,9 +10,14 @@ import {
     X,
     UserCircle,
     AlertTriangle,
-    Save
+    Save,
+    Eye,
+    Phone,
+    UserSquare2
 } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
+import { StudentProfileCard } from "../components/students/StudentProfileCard";
+import type { StudentProfileData } from "../components/students/types";
 
 interface Student {
     id: number;
@@ -42,16 +46,38 @@ interface ConductReport {
     grupo?: string;
 }
 
+const incidentTypeLabels: Record<string, string> = {
+    amonestacion: "Amonestacion",
+    suspension: "Suspension",
+    nota: "Nota",
+    warning: "Amonestacion",
+    note: "Nota",
+};
+
+const documentTypeLabels: Record<string, string> = {
+    photo: "Fotografia",
+    acta_nacimiento: "Acta de nacimiento",
+    curp: "CURP",
+    certificado_secundaria: "Certificado de secundaria",
+    comprobante_domicilio: "Comprobante de domicilio",
+    other: "Otro",
+};
+
 export function PrefectPage() {
-    const user = useAuthStore(s => s.user);
     const [loading, setLoading] = useState(false);
     const [reports, setReports] = useState<ConductReport[]>([]);
+    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
     
     // Modal states
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const [searchingStudents, setSearchingStudents] = useState(false);
     const [students, setStudents] = useState<Student[]>([]);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+    const [profileOpen, setProfileOpen] = useState(false);
+    const [profileLoading, setProfileLoading] = useState(false);
+    const [profileError, setProfileError] = useState<string | null>(null);
+    const [studentProfile, setStudentProfile] = useState<StudentProfileData | null>(null);
     
     // Form state
     const [formData, setFormData] = useState({
@@ -64,6 +90,25 @@ export function PrefectPage() {
     useEffect(() => {
         loadRecentReports();
     }, []);
+
+    useEffect(() => {
+        if (!isModalOpen || selectedStudent) {
+            return;
+        }
+
+        const trimmedQuery = searchQuery.trim();
+        if (trimmedQuery.length < 3) {
+            setStudents([]);
+            setSearchingStudents(false);
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            void searchStudents(trimmedQuery);
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [isModalOpen, searchQuery, selectedStudent]);
 
     const loadRecentReports = async () => {
         try {
@@ -86,30 +131,36 @@ export function PrefectPage() {
     const searchStudents = async (query: string) => {
         if (query.length < 3) {
             setStudents([]);
+            setSearchingStudents(false);
             return;
         }
         
         try {
+            setSearchingStudents(true);
             const token = useAuthStore.getState().token;
-            const res = await fetch(`/api/students?q=${encodeURIComponent(query)}&limit=10`, {
+            const params = new URLSearchParams({
+                search: query,
+                limit: "10",
+            });
+            const res = await fetch(`/api/students?${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             const data = await res.json() as { success: boolean; data: Student[] };
             if (data.success) {
                 setStudents(data.data);
+            } else {
+                setStudents([]);
             }
         } catch (error) {
             console.error("Error searching students:", error);
+            setStudents([]);
+        } finally {
+            setSearchingStudents(false);
         }
     };
 
     const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = e.target.value;
-        setSearchQuery(val);
-        
-        // Simple debounce
-        const timeoutId = setTimeout(() => searchStudents(val), 300);
-        return () => clearTimeout(timeoutId);
+        setSearchQuery(e.target.value);
     };
 
     const openModal = () => {
@@ -126,6 +177,31 @@ export function PrefectPage() {
 
     const closeModal = () => {
         setIsModalOpen(false);
+    };
+
+    const loadStudentProfile = async (studentId: number) => {
+        try {
+            setProfileOpen(true);
+            setProfileLoading(true);
+            setProfileError(null);
+            const token = useAuthStore.getState().token;
+            const res = await fetch(`/api/students/${studentId}/profile`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json() as { success: boolean; data?: StudentProfileData; error?: string };
+            if (data.success && data.data) {
+                setStudentProfile(data.data);
+            } else {
+                setStudentProfile(null);
+                setProfileError(data.error ?? "No se pudo cargar la ficha del alumno.");
+            }
+        } catch (error) {
+            console.error("Error loading student profile:", error);
+            setStudentProfile(null);
+            setProfileError("No se pudo cargar la ficha del alumno.");
+        } finally {
+            setProfileLoading(false);
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -152,21 +228,21 @@ export function PrefectPage() {
             const data = await res.json() as { success: boolean; error?: string };
             if (data.success) {
                 closeModal();
-                loadRecentReports(); // Reload the list
+                setFeedback({ type: "success", text: "Incidencia guardada correctamente." });
+                loadRecentReports();
+                void loadStudentProfile(selectedStudent.id);
             } else {
-                alert("Error: " + data.error);
+                setFeedback({ type: "error", text: data.error ?? "No se pudo guardar la incidencia." });
             }
         } catch (error) {
             console.error("Error submitting report:", error);
-            alert("Error al guardar el reporte");
+            setFeedback({ type: "error", text: "No se pudo guardar la incidencia." });
         } finally {
             setSubmitting(false);
         }
     };
 
     const deleteReport = async (id: number) => {
-        if (!confirm("¿Estás seguro de que deseas eliminar este reporte?")) return;
-        
         try {
             const token = useAuthStore.getState().token;
             const res = await fetch(`/api/conduct/${id}`, {
@@ -177,11 +253,13 @@ export function PrefectPage() {
             
             if (data.success) {
                 setReports(prev => prev.filter(r => r.id !== id));
+                setFeedback({ type: "success", text: "Reporte eliminado correctamente." });
             } else {
-                alert("Error: " + data.error);
+                setFeedback({ type: "error", text: data.error ?? "No se pudo eliminar el reporte." });
             }
         } catch (error) {
             console.error("Error deleting report:", error);
+            setFeedback({ type: "error", text: "No se pudo eliminar el reporte." });
         }
     };
 
@@ -220,6 +298,16 @@ export function PrefectPage() {
                     </button>
                 </div>
             </div>
+
+            {feedback && (
+                <div className={`rounded-xl border px-4 py-3 text-sm ${
+                    feedback.type === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-red-200 bg-red-50 text-red-700"
+                }`}>
+                    {feedback.text}
+                </div>
+            )}
 
             {/* Content Area */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -286,13 +374,22 @@ export function PrefectPage() {
                                             {report.reported_by_name || 'Sistema'}
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <button 
-                                                onClick={() => deleteReport(report.id)}
-                                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                                                title="Eliminar reporte"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex items-center justify-end gap-2">
+                                                <button
+                                                    onClick={() => void loadStudentProfile(report.student_id)}
+                                                    className="p-1.5 text-brand-600 hover:bg-brand-50 rounded-md transition-colors"
+                                                    title="Ver perfil del alumno"
+                                                >
+                                                    <Eye className="w-4 h-4" />
+                                                </button>
+                                                <button 
+                                                    onClick={() => deleteReport(report.id)}
+                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                                                    title="Eliminar reporte"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -333,6 +430,11 @@ export function PrefectPage() {
                                                 onChange={handleSearchChange}
                                                 className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                                             />
+                                            {searchingStudents && (
+                                                <div className="mt-2 text-xs text-gray-500">
+                                                    Buscando alumnos...
+                                                </div>
+                                            )}
                                             {students.length > 0 && (
                                                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
                                                     {students.map(s => (
@@ -342,6 +444,7 @@ export function PrefectPage() {
                                                                 setSelectedStudent(s);
                                                                 setSearchQuery("");
                                                                 setStudents([]);
+                                                                void loadStudentProfile(s.id);
                                                             }}
                                                             className="px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0"
                                                         >
@@ -441,6 +544,109 @@ export function PrefectPage() {
                                     </>
                                 )}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {profileOpen && (
+                <div className="fixed inset-0 z-40 flex justify-end bg-black/30 backdrop-blur-sm">
+                    <div className="h-full w-full max-w-xl overflow-y-auto border-l border-gray-200 bg-gray-50 shadow-2xl">
+                        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white/95 px-5 py-4 backdrop-blur">
+                            <div>
+                                <h2 className="text-lg font-semibold text-gray-900">Perfil rapido del alumno</h2>
+                                <p className="text-sm text-gray-500">Consulta sin salir del flujo de prefectura</p>
+                            </div>
+                            <button
+                                onClick={() => setProfileOpen(false)}
+                                className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4 p-5">
+                            <StudentProfileCard
+                                profile={studentProfile}
+                                loading={profileLoading}
+                                error={profileError}
+                            />
+
+                            {studentProfile && (
+                                <>
+                                    <section className="card">
+                                        <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                            <Phone className="h-4 w-4 text-brand-600" />
+                                            Contacto y tutor principal
+                                        </h3>
+                                        <div className="mt-4 space-y-3 text-sm text-gray-700">
+                                            <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Tutor</p>
+                                                <p className="mt-2 font-medium text-gray-900">{studentProfile.guardians[0]?.name || "Sin tutor registrado"}</p>
+                                                <p className="mt-1">{studentProfile.guardians[0]?.relationship || "Sin parentesco registrado"}</p>
+                                            </div>
+                                            <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Telefono</p>
+                                                <p className="mt-2 font-medium text-gray-900">{studentProfile.guardians[0]?.phone || "Sin telefono principal"}</p>
+                                                <p className="mt-1">{studentProfile.guardians[0]?.email || "Sin correo del tutor"}</p>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    <section className="card">
+                                        <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                            <FileText className="h-4 w-4 text-brand-600" />
+                                            Documentos principales
+                                        </h3>
+                                        <div className="mt-4 space-y-2">
+                                            {studentProfile.documents.length === 0 ? (
+                                                <p className="text-sm text-gray-500">No hay documentos cargados.</p>
+                                            ) : (
+                                                studentProfile.documents.slice(0, 5).map((document) => (
+                                                    <div key={document.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 p-3 text-sm">
+                                                        <div className="min-w-0">
+                                                            <p className="truncate font-medium text-gray-900">{document.file_name}</p>
+                                                            <p className="truncate text-xs text-gray-500">
+                                                                {documentTypeLabels[document.document_type] ?? document.document_type}
+                                                            </p>
+                                                        </div>
+                                                        {document.is_primary && (
+                                                            <span className="rounded-full bg-brand-100 px-2 py-1 text-xs font-medium text-brand-700">
+                                                                Principal
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </section>
+
+                                    <section className="card">
+                                        <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                            <UserSquare2 className="h-4 w-4 text-brand-600" />
+                                            Incidencias recientes
+                                        </h3>
+                                        <div className="mt-4 space-y-2">
+                                            {studentProfile.recent_incidents.length === 0 ? (
+                                                <p className="text-sm text-gray-500">Sin incidencias recientes.</p>
+                                            ) : (
+                                                studentProfile.recent_incidents.map((incident) => (
+                                                    <div key={incident.id} className="rounded-xl border border-gray-100 p-3">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <p className="text-sm font-medium text-gray-900">
+                                                                {incidentTypeLabels[incident.report_type ?? incident.type ?? "nota"] ?? "Nota"}
+                                                            </p>
+                                                            <p className="text-xs text-gray-500">{format(parseISO(incident.date), "dd/MM/yyyy")}</p>
+                                                        </div>
+                                                        <p className="mt-2 text-sm text-gray-700">{incident.description}</p>
+                                                        <p className="mt-1 text-xs text-gray-500">{incident.reported_by_name || "Sistema"}</p>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </section>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
