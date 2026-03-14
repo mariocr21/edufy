@@ -44,6 +44,60 @@ export interface PrefectureTimelineEvent {
     created_at: string | null;
 }
 
+export const conductCategoryCatalog = [
+    { id: "disciplina", label: "Disciplina" },
+    { id: "respeto", label: "Respeto" },
+    { id: "uniforme", label: "Uniforme" },
+    { id: "puntualidad", label: "Puntualidad" },
+    { id: "uso_celular", label: "Uso de celular" },
+    { id: "materiales", label: "Tareas y materiales" },
+    { id: "seguridad", label: "Seguridad" },
+    { id: "otro", label: "Otro" },
+] as const;
+
+export const conductSeverityCatalog = [
+    { id: "leve", label: "Leve" },
+    { id: "media", label: "Media" },
+    { id: "grave", label: "Grave" },
+] as const;
+
+export const conductBehaviorCatalog = [
+    { id: "interrumpe_clase", label: "Interrumpio la clase" },
+    { id: "uso_celular_clase", label: "Uso de celular en clase" },
+    { id: "sin_uniforme", label: "No portaba uniforme" },
+    { id: "lenguaje_inapropiado", label: "Lenguaje inapropiado" },
+    { id: "llego_tarde", label: "Llego tarde" },
+    { id: "no_ingreso_aula", label: "No ingreso al aula" },
+    { id: "agresion_verbal", label: "Agresion verbal" },
+    { id: "conducta_positiva", label: "Conducta positiva destacada" },
+] as const;
+
+export const justificationReasonCatalog = [
+    { id: "cita_medica", label: "Cita medica" },
+    { id: "enfermedad", label: "Enfermedad" },
+    { id: "tramite_familiar", label: "Tramite familiar" },
+    { id: "situacion_personal", label: "Situacion personal" },
+    { id: "representacion_escolar", label: "Representacion escolar" },
+    { id: "error_captura", label: "Error de captura" },
+    { id: "otro", label: "Otro" },
+] as const;
+
+export const justificationEvidenceCatalog = [
+    { id: "constancia", label: "Constancia" },
+    { id: "recado_tutor", label: "Recado del tutor" },
+    { id: "llamada_confirmada", label: "Llamada confirmada" },
+    { id: "sin_evidencia", label: "Sin evidencia" },
+] as const;
+
+type CatalogItem<T extends string> = { id: T; label: string };
+
+function getLabelFromCatalog<T extends readonly CatalogItem<string>[]>(
+    catalog: T,
+    id: string,
+): string {
+    return catalog.find((item) => item.id === id)?.label ?? id;
+}
+
 const prefectureEventLabels: Record<PrefectureEventType, string> = {
     conducta: "Conducta",
     falta_justificada: "Falta justificada",
@@ -74,22 +128,46 @@ export function getPrefectureEventLabel(eventType: PrefectureEventType): string 
     return prefectureEventLabels[eventType];
 }
 
+export function getJustificationReasonLabel(reasonId: string): string {
+    return getLabelFromCatalog(justificationReasonCatalog, reasonId);
+}
+
+export function getJustificationEvidenceLabel(evidenceId: string): string {
+    return getLabelFromCatalog(justificationEvidenceCatalog, evidenceId);
+}
+
+export function getConductCategoryLabel(categoryId: string): string {
+    return getLabelFromCatalog(conductCategoryCatalog, categoryId);
+}
+
+export function getConductSeverityLabel(severityId: string): string {
+    return getLabelFromCatalog(conductSeverityCatalog, severityId);
+}
+
+export function getConductBehaviorLabel(behaviorId: string): string {
+    return getLabelFromCatalog(conductBehaviorCatalog, behaviorId);
+}
+
 export function buildPrefectureWhatsappMessage(input: {
     eventType: PrefectureEventType;
     studentName: string;
+    guardianName?: string | null;
     groupName?: string | null;
     eventDate: string;
     summary: string;
+    details?: string | null;
 }) {
     const groupLine = input.groupName ? `Grupo: ${input.groupName}` : "Grupo: Sin grupo registrado";
 
     return [
-        "Buen dia, le compartimos informacion de Prefectura.",
+        input.guardianName ? `Buen dia, ${input.guardianName}.` : "Buen dia.",
+        "Le compartimos informacion de Prefectura.",
         `Alumno: ${input.studentName}`,
         groupLine,
         `Fecha: ${input.eventDate}`,
         `Tipo de evento: ${getPrefectureEventLabel(input.eventType)}`,
         `Resumen: ${input.summary}`,
+        ...(input.details ? [`Detalle: ${input.details}`] : []),
         "Favor de dar seguimiento por este medio o acudir al plantel si se requiere.",
     ].join("\n");
 }

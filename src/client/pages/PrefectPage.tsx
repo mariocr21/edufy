@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import {
     AlertTriangle,
+    CheckCircle2,
     Eye,
     FileText,
     LoaderCircle,
@@ -22,7 +23,18 @@ import {
 import { PrefectureTimeline } from "../components/prefecture/PrefectureTimeline";
 import { useAuthStore } from "../stores/authStore";
 import {
+    buildPrefectureWhatsappMessage,
+    conductBehaviorCatalog,
+    conductCategoryCatalog,
+    conductSeverityCatalog,
+    getConductBehaviorLabel,
+    getConductCategoryLabel,
+    getConductSeverityLabel,
+    getJustificationEvidenceLabel,
+    getJustificationReasonLabel,
     getPrefectureEventLabel,
+    justificationEvidenceCatalog,
+    justificationReasonCatalog,
     type PrefectureTimelineEvent,
 } from "../../shared/prefecture";
 
@@ -116,8 +128,12 @@ export function PrefectPage() {
     const [submitting, setSubmitting] = useState(false);
     const [conductForm, setConductForm] = useState({
         report_type: "amonestacion" as "amonestacion" | "suspension" | "nota",
+        category: "disciplina",
+        severity: "leve",
+        behavior: "interrumpe_clase",
         description: "",
         date: format(new Date(), "yyyy-MM-dd"),
+        prepare_whatsapp: true,
     });
     const [eventForm, setEventForm] = useState({
         event_date: format(new Date(), "yyyy-MM-dd"),
@@ -127,8 +143,11 @@ export function PrefectPage() {
     const [justifyForm, setJustifyForm] = useState({
         attendance_id: "",
         event_date: format(new Date(), "yyyy-MM-dd"),
-        reason: "",
-        summary: "",
+        reason_key: "cita_medica",
+        evidence_key: "constancia",
+        summary: "Falta justificada",
+        notes: "",
+        prepare_whatsapp: true,
     });
 
     const request = async <T,>(url: string, options?: RequestInit) => {
@@ -234,6 +253,69 @@ export function PrefectPage() {
         await loadStudentContext(selectedStudent);
     };
 
+    const primaryGuardianName = studentProfile?.guardians[0]?.name || null;
+
+    const buildConductDescription = () => {
+        const parts = [
+            `Categoria: ${getConductCategoryLabel(conductForm.category)}`,
+            `Severidad: ${getConductSeverityLabel(conductForm.severity)}`,
+            `Conducta: ${getConductBehaviorLabel(conductForm.behavior)}`,
+        ];
+
+        if (conductForm.description.trim()) {
+            parts.push(`Contexto: ${conductForm.description.trim()}`);
+        }
+
+        return parts.join("\n");
+    };
+
+    const buildConductSummary = () => {
+        return `${getConductBehaviorLabel(conductForm.behavior)} (${getConductSeverityLabel(conductForm.severity).toLowerCase()})`;
+    };
+
+    const buildJustificationReasonText = () => {
+        const parts = [
+            `Motivo: ${getJustificationReasonLabel(justifyForm.reason_key)}`,
+            `Evidencia: ${getJustificationEvidenceLabel(justifyForm.evidence_key)}`,
+        ];
+
+        if (justifyForm.notes.trim()) {
+            parts.push(`Observaciones: ${justifyForm.notes.trim()}`);
+        }
+
+        return parts.join("\n");
+    };
+
+    const buildWhatsappPreview = () => {
+        if (!selectedStudent) return "";
+
+        if (activeAction === "conducta") {
+            return buildPrefectureWhatsappMessage({
+                eventType: "conducta",
+                studentName: `${selectedStudent.paterno} ${selectedStudent.materno} ${selectedStudent.name}`.trim(),
+                guardianName: primaryGuardianName,
+                groupName: selectedStudent.grupo,
+                eventDate: conductForm.date,
+                summary: buildConductSummary(),
+                details: buildConductDescription(),
+            });
+        }
+
+        if (activeAction === "falta_justificada") {
+            return buildPrefectureWhatsappMessage({
+                eventType: "falta_justificada",
+                studentName: `${selectedStudent.paterno} ${selectedStudent.materno} ${selectedStudent.name}`.trim(),
+                guardianName: primaryGuardianName,
+                groupName: selectedStudent.grupo,
+                eventDate: justifyForm.event_date,
+                summary: justifyForm.summary.trim() || "Falta justificada",
+                details: buildJustificationReasonText(),
+            });
+        }
+
+        return "";
+    };
+
     const openAction = (action: PrefectureActionType) => {
         setFeedback(null);
         setActiveAction(action);
@@ -241,8 +323,12 @@ export function PrefectPage() {
         if (action === "conducta") {
             setConductForm({
                 report_type: "amonestacion",
+                category: "disciplina",
+                severity: "leve",
+                behavior: "interrumpe_clase",
                 description: "",
                 date: format(new Date(), "yyyy-MM-dd"),
+                prepare_whatsapp: true,
             });
             return;
         }
@@ -252,8 +338,11 @@ export function PrefectPage() {
             setJustifyForm({
                 attendance_id: firstAbsent ? String(firstAbsent.id) : "",
                 event_date: format(new Date(), "yyyy-MM-dd"),
-                reason: "",
-                summary: "",
+                reason_key: "cita_medica",
+                evidence_key: "constancia",
+                summary: "Falta justificada",
+                notes: "",
+                prepare_whatsapp: true,
             });
             return;
         }
@@ -284,16 +373,22 @@ export function PrefectPage() {
     const submitConduct = async () => {
         if (!selectedStudent) return;
 
-        const { payload } = await request<{ id: number }>("/api/conduct", {
+        const { payload } = await request<{ id: number; prefecture_event_id?: number | null }>("/api/conduct", {
             method: "POST",
             body: JSON.stringify({
                 student_id: selectedStudent.id,
-                ...conductForm,
+                report_type: conductForm.report_type,
+                description: buildConductDescription(),
+                date: conductForm.date,
             }),
         });
 
         if (!payload.success) {
             throw new Error(payload.error ?? "No se pudo guardar la incidencia.");
+        }
+
+        if (conductForm.prepare_whatsapp && payload.data?.prefecture_event_id) {
+            await openWhatsappForEvent(payload.data.prefecture_event_id);
         }
     };
 
@@ -355,18 +450,22 @@ export function PrefectPage() {
             throw new Error("Selecciona una falta para justificar.");
         }
 
-        const { payload } = await request(`/api/prefecture/attendance/${justifyForm.attendance_id}/justify`, {
+        const { payload } = await request<{ event_id?: number | null }>(`/api/prefecture/attendance/${justifyForm.attendance_id}/justify`, {
             method: "POST",
             body: JSON.stringify({
-                reason: justifyForm.reason,
+                reason: buildJustificationReasonText(),
                 event_date: justifyForm.event_date,
-                summary: justifyForm.summary || undefined,
+                summary: justifyForm.summary.trim() || undefined,
                 guardian_id: studentProfile?.guardians[0]?.id ?? null,
             }),
         });
 
         if (!payload.success) {
             throw new Error(payload.error ?? "No se pudo justificar la falta.");
+        }
+
+        if (justifyForm.prepare_whatsapp && payload.data?.event_id) {
+            await openWhatsappForEvent(payload.data.event_id);
         }
     };
 
@@ -826,15 +925,82 @@ export function PrefectPage() {
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="mb-1 block text-sm font-medium text-slate-700">Descripcion</label>
+                                        <label className="mb-2 block text-sm font-medium text-slate-700">Categoria</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {conductCategoryCatalog.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    onClick={() => setConductForm((prev) => ({ ...prev, category: item.id }))}
+                                                    className={`rounded-full px-3 py-2 text-sm transition ${
+                                                        conductForm.category === item.id
+                                                            ? "bg-slate-900 text-white"
+                                                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                                    }`}
+                                                >
+                                                    {item.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div>
+                                            <label className="mb-2 block text-sm font-medium text-slate-700">Severidad</label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {conductSeverityCatalog.map((item) => (
+                                                    <button
+                                                        key={item.id}
+                                                        type="button"
+                                                        onClick={() => setConductForm((prev) => ({ ...prev, severity: item.id }))}
+                                                        className={`rounded-full px-3 py-2 text-sm transition ${
+                                                            conductForm.severity === item.id
+                                                                ? "bg-red-600 text-white"
+                                                                : "bg-red-50 text-red-700 hover:bg-red-100"
+                                                        }`}
+                                                    >
+                                                        {item.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="mb-2 block text-sm font-medium text-slate-700">Conducta observada</label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {conductBehaviorCatalog.map((item) => (
+                                                    <button
+                                                        key={item.id}
+                                                        type="button"
+                                                        onClick={() => setConductForm((prev) => ({ ...prev, behavior: item.id }))}
+                                                        className={`rounded-2xl px-3 py-2 text-sm transition ${
+                                                            conductForm.behavior === item.id
+                                                                ? "bg-brand-600 text-white"
+                                                                : "bg-brand-50 text-brand-700 hover:bg-brand-100"
+                                                        }`}
+                                                    >
+                                                        {item.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-sm font-medium text-slate-700">Contexto adicional</label>
                                         <textarea
                                             value={conductForm.description}
                                             onChange={(e) => setConductForm((prev) => ({ ...prev, description: e.target.value }))}
                                             className="input-field min-h-32 resize-none"
-                                            placeholder="Describe la incidencia disciplinaria."
-                                            required
+                                            placeholder="Agrega detalles puntuales, reaccion del alumno o acuerdos tomados."
                                         />
                                     </div>
+                                    <label className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                                        <input
+                                            type="checkbox"
+                                            checked={conductForm.prepare_whatsapp}
+                                            onChange={(e) => setConductForm((prev) => ({ ...prev, prepare_whatsapp: e.target.checked }))}
+                                            className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        Preparar mensaje de WhatsApp para el tutor al guardar
+                                    </label>
                                 </div>
                             )}
 
@@ -884,15 +1050,61 @@ export function PrefectPage() {
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="mb-1 block text-sm font-medium text-slate-700">Motivo</label>
+                                        <label className="mb-2 block text-sm font-medium text-slate-700">Motivo de la justificacion</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {justificationReasonCatalog.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    onClick={() => setJustifyForm((prev) => ({ ...prev, reason_key: item.id }))}
+                                                    className={`rounded-full px-3 py-2 text-sm transition ${
+                                                        justifyForm.reason_key === item.id
+                                                            ? "bg-emerald-600 text-white"
+                                                            : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                                    }`}
+                                                >
+                                                    {item.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="mb-2 block text-sm font-medium text-slate-700">Soporte recibido</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {justificationEvidenceCatalog.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    onClick={() => setJustifyForm((prev) => ({ ...prev, evidence_key: item.id }))}
+                                                    className={`rounded-full px-3 py-2 text-sm transition ${
+                                                        justifyForm.evidence_key === item.id
+                                                            ? "bg-sky-600 text-white"
+                                                            : "bg-sky-50 text-sky-700 hover:bg-sky-100"
+                                                    }`}
+                                                >
+                                                    {item.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-sm font-medium text-slate-700">Observaciones</label>
                                         <textarea
-                                            value={justifyForm.reason}
-                                            onChange={(e) => setJustifyForm((prev) => ({ ...prev, reason: e.target.value }))}
+                                            value={justifyForm.notes}
+                                            onChange={(e) => setJustifyForm((prev) => ({ ...prev, notes: e.target.value }))}
                                             className="input-field min-h-28 resize-none"
-                                            placeholder="Captura la razon de la justificacion."
-                                            required
+                                            placeholder="Anota detalles adicionales o aclaraciones de la familia."
                                         />
                                     </div>
+                                    <label className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                                        <input
+                                            type="checkbox"
+                                            checked={justifyForm.prepare_whatsapp}
+                                            onChange={(e) => setJustifyForm((prev) => ({ ...prev, prepare_whatsapp: e.target.checked }))}
+                                            className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        Preparar mensaje de WhatsApp para el tutor al guardar
+                                    </label>
                                 </div>
                             )}
 
@@ -934,6 +1146,18 @@ export function PrefectPage() {
                                             placeholder="Agrega contexto util para seguimiento."
                                         />
                                     </div>
+                                </div>
+                            )}
+
+                            {(activeAction === "conducta" || activeAction === "falta_justificada") && (
+                                <div className="mt-6 rounded-[24px] border border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#ecfeff_100%)] p-4">
+                                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                        Vista previa del mensaje para WhatsApp
+                                    </div>
+                                    <p className="mt-3 whitespace-pre-line rounded-2xl bg-white p-4 text-sm leading-6 text-slate-700 shadow-sm">
+                                        {buildWhatsappPreview()}
+                                    </p>
                                 </div>
                             )}
 

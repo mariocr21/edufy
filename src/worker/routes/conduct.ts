@@ -2,7 +2,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Bindings } from "../bindings";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { insertPrefectureEvent } from "../lib/prefecture";
+import {
+    getPrimaryGuardianForStudent,
+    insertPrefectureEvent,
+} from "../lib/prefecture";
 
 const conduct = new Hono<{ Bindings: Bindings }>();
 
@@ -152,7 +155,9 @@ conduct.post("/", requireAuth, requireRoles(["admin", "prefect", "teacher"]), as
 
         const conductId = Number(result.meta.last_row_id);
 
-        await insertPrefectureEvent(db, {
+        const guardianId = (await getPrimaryGuardianForStudent(db, data.student_id))?.id ?? null;
+
+        const prefectureEventId = await insertPrefectureEvent(db, {
             student_id: data.student_id,
             event_type: "conducta",
             event_date: data.date,
@@ -160,12 +165,14 @@ conduct.post("/", requireAuth, requireRoles(["admin", "prefect", "teacher"]), as
             details: data.description,
             created_by: user.id,
             related_conduct_id: conductId,
+            guardian_id: guardianId,
         });
 
         return c.json({
             success: true,
             message: "Reporte disciplinario guardado",
             id: conductId,
+            prefecture_event_id: prefectureEventId,
         }, 201);
     } catch (error: any) {
         if (error instanceof z.ZodError) {

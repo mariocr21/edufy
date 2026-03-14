@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
     buildPrefectureWhatsappMessage,
+    conductBehaviorCatalog,
+    conductCategoryCatalog,
+    getJustificationReasonLabel,
     getPrefectureEventLabel,
+    justificationReasonCatalog,
     prefectureEventTypes,
     sortPrefectureTimeline,
 } from "./prefecture.ts";
@@ -36,19 +40,30 @@ test("buildPrefectureWhatsappMessage genera un texto claro con alumno, grupo, fe
     const message = buildPrefectureWhatsappMessage({
         eventType: "citatorio",
         studentName: "Luis Perez Lopez",
+        guardianName: "Sra. Maria Lopez",
         groupName: "4 PIA A",
         eventDate: "2026-03-13",
         summary: "Se solicita presentarse en prefectura al inicio del turno.",
+        details: "Motivo: seguimiento disciplinario.",
     });
 
     assert.match(message, /Luis Perez Lopez/);
+    assert.match(message, /Sra\. Maria Lopez/);
     assert.match(message, /4 PIA A/);
     assert.match(message, /2026-03-13/);
     assert.match(message, /Citatorio/);
     assert.match(message, /Se solicita presentarse en prefectura al inicio del turno\./);
+    assert.match(message, /seguimiento disciplinario/i);
 });
 
 test("getPrefectureEventLabel devuelve etiquetas legibles en espanol", () => {
     assert.equal(getPrefectureEventLabel("contacto_tutor"), "Contacto con tutor");
     assert.equal(getPrefectureEventLabel("retardo"), "Retardo");
+});
+
+test("expone catalogos predefinidos para conducta y justificaciones", () => {
+    assert.ok(conductCategoryCatalog.some((item) => item.id === "uso_celular"));
+    assert.ok(conductBehaviorCatalog.some((item) => item.id === "agresion_verbal"));
+    assert.ok(justificationReasonCatalog.some((item) => item.id === "cita_medica"));
+    assert.equal(getJustificationReasonLabel("error_captura"), "Error de captura");
 });

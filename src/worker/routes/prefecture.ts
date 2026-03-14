@@ -173,6 +173,7 @@ prefecture.post(
                 pe.event_type,
                 pe.event_date,
                 pe.summary,
+                pe.details,
                 pe.guardian_id,
                 st.name,
                 st.paterno,
@@ -189,6 +190,7 @@ prefecture.post(
                 event_type: z.infer<typeof prefectureEventTypeSchema>;
                 event_date: string;
                 summary: string;
+                details: string | null;
                 guardian_id: number | null;
                 name: string;
                 paterno: string;
@@ -215,9 +217,11 @@ prefecture.post(
         const message = buildPrefectureWhatsappMessage({
             eventType: event.event_type,
             studentName,
+            guardianName: guardian?.name ?? null,
             groupName: event.grupo,
             eventDate: event.event_date,
             summary: event.summary,
+            details: event.details,
         });
 
         await db.prepare(`
