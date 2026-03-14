@@ -47,6 +47,7 @@ interface AttendanceReportRow {
     id: number;
     date: string;
     status: "present" | "absent" | "late" | "justified";
+    counts_as_attendance?: number;
     no_control: string;
     student_name: string;
     paterno: string;
@@ -288,7 +289,9 @@ export function AttendancePage() {
         return fullName.includes(term) || student.no_control.toLowerCase().includes(term);
     });
 
-    const presentCount = students.filter((student) => student.status === "present").length;
+    const presentCount = students.filter((student) =>
+        ["present", "late", "justified"].includes(student.status),
+    ).length;
 
     const getStatusIcon = (status: StudentAttendance["status"]) => {
         switch (status) {
@@ -347,7 +350,7 @@ export function AttendancePage() {
                         <div className="flex flex-col sm:flex-row gap-3">
                             <div className="bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 flex flex-col justify-center items-center flex-shrink-0">
                                 <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">
-                                    Presentes
+                                    Asistencia valida
                                 </span>
                                 <span className="text-xl font-bold text-gray-900">
                                     {presentCount} <span className="text-sm text-gray-400 font-normal">/ {students.length}</span>

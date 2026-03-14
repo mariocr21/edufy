@@ -135,6 +135,7 @@ attendance.get("/report", requireAuth, requireRoles(["admin", "prefect", "teache
 
     let query = `
         SELECT a.id, a.date, a.status,
+               CASE WHEN a.status IN ('present', 'late', 'justified') THEN 1 ELSE 0 END as counts_as_attendance,
                st.no_control, st.name as student_name, st.paterno, st.materno,
                g.name as group_name,
                sub.name as subject_name
