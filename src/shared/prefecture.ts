@@ -26,6 +26,16 @@ export const prefectureEventInputSchema = z.object({
 export type PrefectureEventType = z.infer<typeof prefectureEventTypeSchema>;
 export type PrefectureEventInput = z.infer<typeof prefectureEventInputSchema>;
 
+const prefectureEventLabels: Record<PrefectureEventType, string> = {
+    conducta: "Conducta",
+    falta_justificada: "Falta justificada",
+    retardo: "Retardo",
+    salida: "Salida",
+    citatorio: "Citatorio",
+    contacto_tutor: "Contacto con tutor",
+    observacion: "Observacion",
+};
+
 type TimelineSortable = {
     event_date: string;
     created_at: string | null;
@@ -40,4 +50,28 @@ export function sortPrefectureTimeline<T extends TimelineSortable>(events: T[]):
 
         return (right.created_at ?? "").localeCompare(left.created_at ?? "");
     });
+}
+
+export function getPrefectureEventLabel(eventType: PrefectureEventType): string {
+    return prefectureEventLabels[eventType];
+}
+
+export function buildPrefectureWhatsappMessage(input: {
+    eventType: PrefectureEventType;
+    studentName: string;
+    groupName?: string | null;
+    eventDate: string;
+    summary: string;
+}) {
+    const groupLine = input.groupName ? `Grupo: ${input.groupName}` : "Grupo: Sin grupo registrado";
+
+    return [
+        "Buen dia, le compartimos informacion de Prefectura.",
+        `Alumno: ${input.studentName}`,
+        groupLine,
+        `Fecha: ${input.eventDate}`,
+        `Tipo de evento: ${getPrefectureEventLabel(input.eventType)}`,
+        `Resumen: ${input.summary}`,
+        "Favor de dar seguimiento por este medio o acudir al plantel si se requiere.",
+    ].join("\n");
 }

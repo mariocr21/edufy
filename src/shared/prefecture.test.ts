@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+    buildPrefectureWhatsappMessage,
+    getPrefectureEventLabel,
     prefectureEventTypes,
     sortPrefectureTimeline,
 } from "./prefecture.ts";
@@ -28,4 +30,25 @@ test("sortPrefectureTimeline ordena por fecha del evento y luego por creacion de
         sorted.map((item) => item.id),
         [3, 2, 1],
     );
+});
+
+test("buildPrefectureWhatsappMessage genera un texto claro con alumno, grupo, fecha y resumen", () => {
+    const message = buildPrefectureWhatsappMessage({
+        eventType: "citatorio",
+        studentName: "Luis Perez Lopez",
+        groupName: "4 PIA A",
+        eventDate: "2026-03-13",
+        summary: "Se solicita presentarse en prefectura al inicio del turno.",
+    });
+
+    assert.match(message, /Luis Perez Lopez/);
+    assert.match(message, /4 PIA A/);
+    assert.match(message, /2026-03-13/);
+    assert.match(message, /Citatorio/);
+    assert.match(message, /Se solicita presentarse en prefectura al inicio del turno\./);
+});
+
+test("getPrefectureEventLabel devuelve etiquetas legibles en espanol", () => {
+    assert.equal(getPrefectureEventLabel("contacto_tutor"), "Contacto con tutor");
+    assert.equal(getPrefectureEventLabel("retardo"), "Retardo");
 });

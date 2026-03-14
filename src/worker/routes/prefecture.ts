@@ -4,6 +4,8 @@ import { zValidator } from "@hono/zod-validator";
 import type { Bindings } from "../bindings";
 import { requireAuth, requireRoles } from "../middleware/auth";
 import {
+    buildPrefectureWhatsappMessage,
+    getPrefectureEventLabel,
     prefectureEventInputSchema,
     prefectureEventTypeSchema,
 } from "../../shared/prefecture";
@@ -22,6 +24,38 @@ const justifyAttendanceSchema = z.object({
     summary: z.string().trim().min(1).optional(),
     guardian_id: z.number().int().positive().optional().nullable(),
 });
+
+prefecture.get(
+    "/students/:id/attendance-records",
+    requireAuth,
+    requireRoles(["admin", "prefect"]),
+    async (c) => {
+        const studentId = Number(c.req.param("id"));
+        const db = c.env.DB;
+
+        const records = await db.prepare(`
+            SELECT
+                a.id,
+                a.date,
+                a.status,
+                s.id as schedule_id,
+                s.period_num,
+                sub.name as subject_name,
+                g.name as group_name
+            FROM attendance a
+            JOIN schedules s ON s.id = a.schedule_id
+            JOIN subjects sub ON sub.id = s.subject_id
+            JOIN groups_table g ON g.id = s.group_id
+            WHERE a.student_id = ?
+            ORDER BY a.date DESC, a.id DESC
+            LIMIT 20
+        `)
+            .bind(studentId)
+            .all();
+
+        return c.json({ success: true, data: records.results });
+    },
+);
 
 prefecture.get(
     "/students/:id/timeline",
@@ -121,6 +155,90 @@ prefecture.post(
             data: { id: eventId },
             message: "Evento registrado en prefectura",
         }, 201);
+    },
+);
+
+prefecture.post(
+    "/events/:id/whatsapp-preview",
+    requireAuth,
+    requireRoles(["admin", "prefect"]),
+    async (c) => {
+        const eventId = Number(c.req.param("id"));
+        const db = c.env.DB;
+
+        const event = await db.prepare(`
+            SELECT
+                pe.id,
+                pe.student_id,
+                pe.event_type,
+                pe.event_date,
+                pe.summary,
+                pe.guardian_id,
+                st.name,
+                st.paterno,
+                st.materno,
+                st.grupo
+            FROM prefecture_events pe
+            JOIN students st ON st.id = pe.student_id
+            WHERE pe.id = ?
+        `)
+            .bind(eventId)
+            .first<{
+                id: number;
+                student_id: number;
+                event_type: z.infer<typeof prefectureEventTypeSchema>;
+                event_date: string;
+                summary: string;
+                guardian_id: number | null;
+                name: string;
+                paterno: string;
+                materno: string | null;
+                grupo: string | null;
+            }>();
+
+        if (!event) {
+            return c.json({ success: false, error: "Evento no encontrado" }, 404);
+        }
+
+        const guardian = event.guardian_id
+            ? await db
+                .prepare("SELECT id, name, phone, relationship FROM guardians WHERE id = ?")
+                .bind(event.guardian_id)
+                .first<{ id: number; name: string; phone: string; relationship: string }>()
+            : await getPrimaryGuardianForStudent(db, event.student_id);
+
+        const studentName = [event.paterno, event.materno ?? "", event.name]
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        const message = buildPrefectureWhatsappMessage({
+            eventType: event.event_type,
+            studentName,
+            groupName: event.grupo,
+            eventDate: event.event_date,
+            summary: event.summary,
+        });
+
+        await db.prepare(`
+            UPDATE prefecture_events
+            SET whatsapp_message = ?
+            WHERE id = ?
+        `)
+            .bind(message, eventId)
+            .run();
+
+        return c.json({
+            success: true,
+            data: {
+                event_id: eventId,
+                event_type: event.event_type,
+                event_label: getPrefectureEventLabel(event.event_type),
+                phone: guardian?.phone ?? null,
+                guardian_name: guardian?.name ?? null,
+                message,
+            },
+        });
     },
 );
 
