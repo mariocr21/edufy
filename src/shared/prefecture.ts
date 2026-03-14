@@ -25,6 +25,24 @@ export const prefectureEventInputSchema = z.object({
 
 export type PrefectureEventType = z.infer<typeof prefectureEventTypeSchema>;
 export type PrefectureEventInput = z.infer<typeof prefectureEventInputSchema>;
+export interface PrefectureTimelineEvent {
+    id: number;
+    student_id: number;
+    event_type: PrefectureEventType;
+    event_date: string;
+    summary: string;
+    details: string | null;
+    created_by: number;
+    created_by_name?: string | null;
+    related_attendance_id?: number | null;
+    related_conduct_id?: number | null;
+    guardian_id?: number | null;
+    guardian_name?: string | null;
+    guardian_phone?: string | null;
+    whatsapp_message?: string | null;
+    whatsapp_opened_at?: string | null;
+    created_at: string | null;
+}
 
 const prefectureEventLabels: Record<PrefectureEventType, string> = {
     conducta: "Conducta",

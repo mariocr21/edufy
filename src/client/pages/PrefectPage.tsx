@@ -19,8 +19,12 @@ import {
     PrefectureQuickActions,
     type PrefectureActionType,
 } from "../components/prefecture/PrefectureQuickActions";
+import { PrefectureTimeline } from "../components/prefecture/PrefectureTimeline";
 import { useAuthStore } from "../stores/authStore";
-import { getPrefectureEventLabel } from "../../shared/prefecture";
+import {
+    getPrefectureEventLabel,
+    type PrefectureTimelineEvent,
+} from "../../shared/prefecture";
 
 interface Student {
     id: number;
@@ -106,6 +110,8 @@ export function PrefectPage() {
     const [studentProfile, setStudentProfile] = useState<StudentProfileData | null>(null);
     const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
     const [attendanceLoading, setAttendanceLoading] = useState(false);
+    const [timeline, setTimeline] = useState<PrefectureTimelineEvent[]>([]);
+    const [timelineLoading, setTimelineLoading] = useState(false);
     const [activeAction, setActiveAction] = useState<PrefectureActionType | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [conductForm, setConductForm] = useState({
@@ -191,24 +197,37 @@ export function PrefectPage() {
         }
     }, []);
 
+    const loadTimeline = useCallback(async (studentId: number) => {
+        const { payload } = await request<{ timeline: PrefectureTimelineEvent[] }>(`/api/prefecture/students/${studentId}/timeline`);
+        if (payload.success && payload.data) {
+            setTimeline(payload.data.timeline || []);
+        } else {
+            setTimeline([]);
+        }
+    }, []);
+
     const loadStudentContext = useCallback(async (student: Student) => {
         try {
             setProfileLoading(true);
             setAttendanceLoading(true);
+            setTimelineLoading(true);
             setProfileError(null);
             await Promise.all([
                 loadStudentProfile(student.id),
                 loadAttendanceRecords(student.id),
+                loadTimeline(student.id),
             ]);
         } catch (error) {
             console.error("Error loading student context:", error);
             setProfileError("No se pudo cargar la informacion operativa del alumno.");
             setAttendanceRecords([]);
+            setTimeline([]);
         } finally {
             setProfileLoading(false);
             setAttendanceLoading(false);
+            setTimelineLoading(false);
         }
-    }, [loadAttendanceRecords, loadStudentProfile]);
+    }, [loadAttendanceRecords, loadStudentProfile, loadTimeline]);
 
     const refreshSelectedStudent = async () => {
         if (!selectedStudent) return;
@@ -441,6 +460,7 @@ export function PrefectPage() {
         if (!selectedStudent) {
             setStudentProfile(null);
             setAttendanceRecords([]);
+            setTimeline([]);
             return;
         }
 
@@ -494,7 +514,7 @@ export function PrefectPage() {
                                                     {student.paterno} {student.materno} {student.name}
                                                 </p>
                                                 <p className="text-xs text-slate-500">
-                                                    {student.no_control} · Grupo {student.grupo || "Sin grupo"}
+                                                    {student.no_control} - Grupo {student.grupo || "Sin grupo"}
                                                 </p>
                                             </div>
                                             <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
@@ -521,7 +541,7 @@ export function PrefectPage() {
                                                 {selectedStudent.paterno} {selectedStudent.materno} {selectedStudent.name}
                                             </p>
                                             <p className="mt-1 text-sm text-slate-600">
-                                                {selectedStudent.no_control} · Grupo {selectedStudent.grupo || "Sin grupo"}
+                                                {selectedStudent.no_control} - Grupo {selectedStudent.grupo || "Sin grupo"}
                                             </p>
                                         </div>
                                     </div>
@@ -616,7 +636,7 @@ export function PrefectPage() {
                                             <div>
                                                 <p className="text-sm font-medium text-slate-900">{record.subject_name}</p>
                                                 <p className="text-xs text-slate-500">
-                                                    {record.group_name} · Modulo {record.period_num}
+                                                    {record.group_name} - Modulo {record.period_num}
                                                 </p>
                                             </div>
                                             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
@@ -643,6 +663,12 @@ export function PrefectPage() {
                             )}
                         </div>
                     </section>
+
+                    <PrefectureTimeline
+                        events={timeline}
+                        loading={timelineLoading}
+                        emptyMessage="Selecciona un alumno para visualizar su bitacora integral de Prefectura."
+                    />
                 </div>
 
                 <section className="card overflow-hidden !p-0">
@@ -702,7 +728,7 @@ export function PrefectPage() {
                                                         {report.paterno} {report.materno} {report.student_name}
                                                     </p>
                                                     <p className="mt-1 text-xs text-slate-500">
-                                                        {report.no_control} · Grupo {report.grupo}
+                                                        {report.no_control} - Grupo {report.grupo}
                                                     </p>
                                                 </td>
                                                 <td className="px-5 py-4">{getReportTypeBadge(report.report_type)}</td>
@@ -825,7 +851,7 @@ export function PrefectPage() {
                                             <option value="">Selecciona una falta</option>
                                             {absencesToJustify.map((record) => (
                                                 <option key={record.id} value={record.id}>
-                                                    {format(parseISO(record.date), "dd/MM/yyyy")} · {record.subject_name} · Modulo {record.period_num}
+                                                    {format(parseISO(record.date), "dd/MM/yyyy")} - {record.subject_name} - Modulo {record.period_num}
                                                 </option>
                                             ))}
                                         </select>
@@ -873,7 +899,7 @@ export function PrefectPage() {
                             {activeAction !== "conducta" && activeAction !== "falta_justificada" && (
                                 <div className="space-y-5">
                                     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-600">
-                                        El evento se registrara como <strong className="font-semibold text-slate-900">{getPrefectureEventLabel(activeAction)}</strong> y quedara disponible para timeline y seguimiento.
+                                        El evento se registrara como <strong className="font-semibold text-slate-900">{getPrefectureEventLabel(activeAction)}</strong> y quedara disponible en la bitacora del alumno.
                                         {activeAction === "contacto_tutor" && " Ademas se preparara el mensaje sugerido para WhatsApp."}
                                     </div>
                                     <div className="grid gap-4 sm:grid-cols-2">
