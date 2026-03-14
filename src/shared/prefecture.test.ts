@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
     buildPrefectureWhatsappMessage,
+    buildWhatsappUrl,
     conductBehaviorCatalog,
     conductCategoryCatalog,
     getJustificationReasonLabel,
@@ -66,4 +67,10 @@ test("expone catalogos predefinidos para conducta y justificaciones", () => {
     assert.ok(conductBehaviorCatalog.some((item) => item.id === "agresion_verbal"));
     assert.ok(justificationReasonCatalog.some((item) => item.id === "cita_medica"));
     assert.equal(getJustificationReasonLabel("error_captura"), "Error de captura");
+});
+
+test("buildWhatsappUrl sanitiza el telefono y codifica el mensaje", () => {
+    const url = buildWhatsappUrl("+52 664-123-4567", "Hola tutor");
+
+    assert.equal(url, "https://wa.me/526641234567?text=Hola%20tutor");
 });

@@ -6,6 +6,7 @@ import {
     Eye,
     FileText,
     LoaderCircle,
+    MessageCircleMore,
     Phone,
     Search,
     ShieldAlert,
@@ -24,6 +25,7 @@ import { PrefectureTimeline } from "../components/prefecture/PrefectureTimeline"
 import { useAuthStore } from "../stores/authStore";
 import {
     buildPrefectureWhatsappMessage,
+    buildWhatsappUrl,
     conductBehaviorCatalog,
     conductCategoryCatalog,
     conductSeverityCatalog,
@@ -254,6 +256,7 @@ export function PrefectPage() {
     };
 
     const primaryGuardianName = studentProfile?.guardians[0]?.name || null;
+    const primaryGuardianPhone = studentProfile?.guardians[0]?.phone || null;
 
     const buildConductDescription = () => {
         const parts = [
@@ -314,6 +317,14 @@ export function PrefectPage() {
         }
 
         return "";
+    };
+
+    const openWhatsappUrl = (phone: string, message: string) => {
+        window.open(
+            buildWhatsappUrl(phone, message),
+            "_blank",
+            "noopener,noreferrer",
+        );
     };
 
     const openAction = (action: PrefectureActionType) => {
@@ -410,9 +421,7 @@ export function PrefectPage() {
             throw new Error("El alumno no tiene un telefono de tutor disponible para WhatsApp.");
         }
 
-        const sanitizedPhone = payload.data.phone.replace(/\D/g, "");
-        const whatsappUrl = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(payload.data.message)}`;
-        window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+        openWhatsappUrl(payload.data.phone, payload.data.message);
 
         await request(`/api/prefecture/events/${eventId}/mark-whatsapp-opened`, {
             method: "POST",
@@ -767,6 +776,14 @@ export function PrefectPage() {
                         events={timeline}
                         loading={timelineLoading}
                         emptyMessage="Selecciona un alumno para visualizar su bitacora integral de Prefectura."
+                        onOpenWhatsapp={(event) => {
+                            if (!event.guardian_phone || !event.whatsapp_message) {
+                                setFeedback({ type: "error", text: "Este evento no tiene telefono o mensaje listo para WhatsApp." });
+                                return;
+                            }
+
+                            openWhatsappUrl(event.guardian_phone, event.whatsapp_message);
+                        }}
                     />
                 </div>
 
@@ -1155,9 +1172,31 @@ export function PrefectPage() {
                                         <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                                         Vista previa del mensaje para WhatsApp
                                     </div>
+                                    <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                        {primaryGuardianPhone ? (
+                                            <>
+                                                Se enviara al tutor principal: <span className="font-medium text-slate-900">{primaryGuardianName || "Tutor registrado"}</span>
+                                                {" "}({primaryGuardianPhone})
+                                            </>
+                                        ) : (
+                                            <span className="text-amber-700">
+                                                Este alumno aun no tiene telefono de tutor registrado. Puedes guardar el evento, pero no se podra abrir WhatsApp hasta capturarlo.
+                                            </span>
+                                        )}
+                                    </div>
                                     <p className="mt-3 whitespace-pre-line rounded-2xl bg-white p-4 text-sm leading-6 text-slate-700 shadow-sm">
                                         {buildWhatsappPreview()}
                                     </p>
+                                    {primaryGuardianPhone && (
+                                        <button
+                                            type="button"
+                                            onClick={() => openWhatsappUrl(primaryGuardianPhone, buildWhatsappPreview())}
+                                            className="mt-3 inline-flex items-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700"
+                                        >
+                                            <MessageCircleMore className="mr-2 h-4 w-4" />
+                                            Abrir WhatsApp ahora
+                                        </button>
+                                    )}
                                 </div>
                             )}
 

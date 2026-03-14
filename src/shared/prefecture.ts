@@ -171,3 +171,8 @@ export function buildPrefectureWhatsappMessage(input: {
         "Favor de dar seguimiento por este medio o acudir al plantel si se requiere.",
     ].join("\n");
 }
+
+export function buildWhatsappUrl(phone: string, message: string): string {
+    const sanitizedPhone = phone.replace(/\D/g, "");
+    return `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(message)}`;
+}

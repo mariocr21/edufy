@@ -10,6 +10,7 @@ import {
     Undo2,
 } from "lucide-react";
 import {
+    buildWhatsappUrl,
     getPrefectureEventLabel,
     type PrefectureTimelineEvent,
 } from "../../../shared/prefecture";
@@ -28,10 +29,12 @@ export function PrefectureTimeline({
     events,
     loading,
     emptyMessage = "Aun no hay eventos registrados para este alumno.",
+    onOpenWhatsapp,
 }: {
     events: PrefectureTimelineEvent[];
     loading?: boolean;
     emptyMessage?: string;
+    onOpenWhatsapp?: (event: PrefectureTimelineEvent) => void;
 }) {
     return (
         <section className="card">
@@ -100,6 +103,33 @@ export function PrefectureTimeline({
                                                 <span className="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600">
                                                     Sin seguimiento de WhatsApp
                                                 </span>
+                                            )}
+                                            {event.whatsapp_message && event.guardian_phone && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const guardianPhone = event.guardian_phone;
+                                                        const whatsappMessage = event.whatsapp_message;
+                                                        if (!guardianPhone || !whatsappMessage) {
+                                                            return;
+                                                        }
+
+                                                        if (onOpenWhatsapp) {
+                                                            onOpenWhatsapp(event);
+                                                            return;
+                                                        }
+
+                                                        window.open(
+                                                            buildWhatsappUrl(guardianPhone, whatsappMessage),
+                                                            "_blank",
+                                                            "noopener,noreferrer",
+                                                        );
+                                                    }}
+                                                    className="inline-flex items-center rounded-full bg-brand-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-brand-700"
+                                                >
+                                                    <MessageCircleMore className="mr-1 h-3.5 w-3.5" />
+                                                    Abrir WhatsApp
+                                                </button>
                                             )}
                                         </div>
                                     </div>
