@@ -292,6 +292,8 @@ export function AttendancePage() {
     const presentCount = students.filter((student) =>
         ["present", "late", "justified"].includes(student.status),
     ).length;
+    const reportValidAttendanceCount = reportData.filter((row) => row.counts_as_attendance === 1).length;
+    const reportAbsentCount = reportData.filter((row) => row.status === "absent").length;
 
     const getStatusIcon = (status: StudentAttendance["status"]) => {
         switch (status) {
@@ -599,6 +601,22 @@ export function AttendancePage() {
                         </div>
                     </div>
 
+                    <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Registros</p>
+                            <p className="mt-2 text-2xl font-bold text-gray-900">{reportData.length}</p>
+                        </div>
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                            <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Asistencia valida</p>
+                            <p className="mt-2 text-2xl font-bold text-emerald-900">{reportValidAttendanceCount}</p>
+                            <p className="mt-1 text-xs text-emerald-700">Incluye presentes, retardos y justificados.</p>
+                        </div>
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm">
+                            <p className="text-xs font-medium uppercase tracking-wide text-red-700">Ausencias</p>
+                            <p className="mt-2 text-2xl font-bold text-red-900">{reportAbsentCount}</p>
+                        </div>
+                    </div>
+
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                         {reportLoading ? (
                             <div className="flex justify-center p-12">
@@ -650,7 +668,7 @@ export function AttendancePage() {
                                                               ? "Ausente"
                                                               : row.status === "late"
                                                                 ? "Retardo"
-                                                                : "Justificado"}
+                                                                : "Justificado (asistencia)"}
                                                     </span>
                                                 </td>
                                             </tr>

@@ -477,7 +477,7 @@ export function PrefectPage() {
                         <p className="text-xs font-semibold uppercase tracking-[0.26em] text-brand-700">Prefectura integral</p>
                         <h1 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight text-slate-950">
                             <ShieldAlert className="h-8 w-8 text-brand-600" />
-                            Consola de bitacora y seguimiento
+                            Consola operativa de Prefectura
                         </h1>
                         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
                             Busca al alumno, captura acciones operativas y deja trazabilidad lista para seguimiento con tutor.
