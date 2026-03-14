@@ -1,23 +1,26 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import {
-    ShieldAlert,
-    Search,
-    Plus,
-    Filter,
-    FileText,
-    Trash2,
-    X,
-    UserCircle,
     AlertTriangle,
-    Save,
     Eye,
+    FileText,
+    LoaderCircle,
     Phone,
-    UserSquare2
+    Search,
+    ShieldAlert,
+    Trash2,
+    UserCircle,
+    UserSquare2,
+    X,
 } from "lucide-react";
-import { useAuthStore } from "../stores/authStore";
 import { StudentProfileCard } from "../components/students/StudentProfileCard";
 import type { StudentProfileData } from "../components/students/types";
+import {
+    PrefectureQuickActions,
+    type PrefectureActionType,
+} from "../components/prefecture/PrefectureQuickActions";
+import { useAuthStore } from "../stores/authStore";
+import { getPrefectureEventLabel } from "../../shared/prefecture";
 
 interface Student {
     id: number;
@@ -31,20 +34,36 @@ interface Student {
 interface ConductReport {
     id: number;
     student_id: number;
-    reported_by: number;
     reported_by_name: string;
     report_type: "amonestacion" | "suspension" | "nota";
     description: string;
     date: string;
     created_at: string;
-    
-    // Joined from student
     student_name?: string;
     paterno?: string;
     materno?: string;
     no_control?: string;
     grupo?: string;
 }
+
+interface AttendanceRecord {
+    id: number;
+    date: string;
+    status: "present" | "absent" | "late" | "justified";
+    schedule_id: number;
+    period_num: number;
+    subject_name: string;
+    group_name: string;
+}
+
+interface ApiResult<T> {
+    success: boolean;
+    data?: T;
+    error?: string;
+    message?: string;
+}
+
+type FeedbackState = { type: "success" | "error"; text: string } | null;
 
 const incidentTypeLabels: Record<string, string> = {
     amonestacion: "Amonestacion",
@@ -63,13 +82,20 @@ const documentTypeLabels: Record<string, string> = {
     other: "Otro",
 };
 
+const actionTitles: Record<PrefectureActionType, string> = {
+    conducta: "Registrar conducta",
+    falta_justificada: "Justificar falta",
+    retardo: "Registrar retardo",
+    salida: "Registrar salida",
+    citatorio: "Crear citatorio",
+    observacion: "Agregar observacion",
+    contacto_tutor: "Notificar tutor",
+};
+
 export function PrefectPage() {
     const [loading, setLoading] = useState(false);
     const [reports, setReports] = useState<ConductReport[]>([]);
-    const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
-    
-    // Modal states
-    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [feedback, setFeedback] = useState<FeedbackState>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchingStudents, setSearchingStudents] = useState(false);
     const [students, setStudents] = useState<Student[]>([]);
@@ -78,24 +104,325 @@ export function PrefectPage() {
     const [profileLoading, setProfileLoading] = useState(false);
     const [profileError, setProfileError] = useState<string | null>(null);
     const [studentProfile, setStudentProfile] = useState<StudentProfileData | null>(null);
-    
-    // Form state
-    const [formData, setFormData] = useState({
+    const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+    const [attendanceLoading, setAttendanceLoading] = useState(false);
+    const [activeAction, setActiveAction] = useState<PrefectureActionType | null>(null);
+    const [submitting, setSubmitting] = useState(false);
+    const [conductForm, setConductForm] = useState({
         report_type: "amonestacion" as "amonestacion" | "suspension" | "nota",
         description: "",
-        date: format(new Date(), "yyyy-MM-dd")
+        date: format(new Date(), "yyyy-MM-dd"),
     });
-    const [submitting, setSubmitting] = useState(false);
+    const [eventForm, setEventForm] = useState({
+        event_date: format(new Date(), "yyyy-MM-dd"),
+        summary: "",
+        details: "",
+    });
+    const [justifyForm, setJustifyForm] = useState({
+        attendance_id: "",
+        event_date: format(new Date(), "yyyy-MM-dd"),
+        reason: "",
+        summary: "",
+    });
 
-    useEffect(() => {
-        loadRecentReports();
+    const request = async <T,>(url: string, options?: RequestInit) => {
+        const token = useAuthStore.getState().token;
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+                ...options?.headers,
+            },
+        });
+
+        const payload = await response.json() as ApiResult<T>;
+        return { response, payload };
+    };
+
+    const loadRecentReports = useCallback(async () => {
+        try {
+            setLoading(true);
+            const { payload } = await request<ConductReport[]>("/api/conduct/recent?limit=50");
+            if (payload.success) {
+                setReports(payload.data || []);
+            }
+        } catch (error) {
+            console.error("Error loading reports:", error);
+            setFeedback({ type: "error", text: "No se pudieron cargar los reportes recientes." });
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    useEffect(() => {
-        if (!isModalOpen || selectedStudent) {
+    const searchStudents = useCallback(async (query: string) => {
+        try {
+            setSearchingStudents(true);
+            const params = new URLSearchParams({ search: query, limit: "10" });
+            const { payload } = await request<Student[]>(`/api/students?${params.toString()}`);
+            setStudents(payload.success ? payload.data || [] : []);
+        } catch (error) {
+            console.error("Error searching students:", error);
+            setStudents([]);
+        } finally {
+            setSearchingStudents(false);
+        }
+    }, []);
+
+    const loadStudentProfile = useCallback(async (studentId: number) => {
+        const { payload } = await request<StudentProfileData>(`/api/students/${studentId}/profile`);
+        if (payload.success && payload.data) {
+            setStudentProfile(payload.data);
+            setProfileError(null);
+            return payload.data;
+        }
+
+        setStudentProfile(null);
+        setProfileError(payload.error ?? "No se pudo cargar la ficha del alumno.");
+        return null;
+    }, []);
+
+    const loadAttendanceRecords = useCallback(async (studentId: number) => {
+        const { payload } = await request<AttendanceRecord[]>(`/api/prefecture/students/${studentId}/attendance-records`);
+        if (payload.success) {
+            setAttendanceRecords(payload.data || []);
+        } else {
+            setAttendanceRecords([]);
+        }
+    }, []);
+
+    const loadStudentContext = useCallback(async (student: Student) => {
+        try {
+            setProfileLoading(true);
+            setAttendanceLoading(true);
+            setProfileError(null);
+            await Promise.all([
+                loadStudentProfile(student.id),
+                loadAttendanceRecords(student.id),
+            ]);
+        } catch (error) {
+            console.error("Error loading student context:", error);
+            setProfileError("No se pudo cargar la informacion operativa del alumno.");
+            setAttendanceRecords([]);
+        } finally {
+            setProfileLoading(false);
+            setAttendanceLoading(false);
+        }
+    }, [loadAttendanceRecords, loadStudentProfile]);
+
+    const refreshSelectedStudent = async () => {
+        if (!selectedStudent) return;
+        await loadStudentContext(selectedStudent);
+    };
+
+    const openAction = (action: PrefectureActionType) => {
+        setFeedback(null);
+        setActiveAction(action);
+
+        if (action === "conducta") {
+            setConductForm({
+                report_type: "amonestacion",
+                description: "",
+                date: format(new Date(), "yyyy-MM-dd"),
+            });
             return;
         }
 
+        if (action === "falta_justificada") {
+            const firstAbsent = attendanceRecords.find((record) => record.status === "absent");
+            setJustifyForm({
+                attendance_id: firstAbsent ? String(firstAbsent.id) : "",
+                event_date: format(new Date(), "yyyy-MM-dd"),
+                reason: "",
+                summary: "",
+            });
+            return;
+        }
+
+        setEventForm({
+            event_date: format(new Date(), "yyyy-MM-dd"),
+            summary: action === "contacto_tutor" ? "Seguimiento con tutor por parte de Prefectura" : "",
+            details: "",
+        });
+    };
+
+    const closeModal = () => {
+        setActiveAction(null);
+    };
+
+    const handleSelectStudent = (student: Student) => {
+        setSelectedStudent(student);
+        setSearchQuery("");
+        setStudents([]);
+    };
+
+    const handleOpenProfile = async (student: Student) => {
+        setSelectedStudent(student);
+        setProfileOpen(true);
+        await loadStudentContext(student);
+    };
+
+    const submitConduct = async () => {
+        if (!selectedStudent) return;
+
+        const { payload } = await request<{ id: number }>("/api/conduct", {
+            method: "POST",
+            body: JSON.stringify({
+                student_id: selectedStudent.id,
+                ...conductForm,
+            }),
+        });
+
+        if (!payload.success) {
+            throw new Error(payload.error ?? "No se pudo guardar la incidencia.");
+        }
+    };
+
+    const openWhatsappForEvent = async (eventId: number) => {
+        const { payload } = await request<{
+            event_id: number;
+            phone: string | null;
+            guardian_name: string | null;
+            message: string;
+        }>(`/api/prefecture/events/${eventId}/whatsapp-preview`, {
+            method: "POST",
+        });
+
+        if (!payload.success || !payload.data) {
+            throw new Error(payload.error ?? "No se pudo preparar el mensaje de WhatsApp.");
+        }
+
+        if (!payload.data.phone) {
+            throw new Error("El alumno no tiene un telefono de tutor disponible para WhatsApp.");
+        }
+
+        const sanitizedPhone = payload.data.phone.replace(/\D/g, "");
+        const whatsappUrl = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(payload.data.message)}`;
+        window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+
+        await request(`/api/prefecture/events/${eventId}/mark-whatsapp-opened`, {
+            method: "POST",
+        });
+    };
+
+    const submitGenericEvent = async () => {
+        if (!selectedStudent || !activeAction || activeAction === "conducta" || activeAction === "falta_justificada") {
+            return;
+        }
+
+        const { payload } = await request<{ id: number | null }>("/api/prefecture/events", {
+            method: "POST",
+            body: JSON.stringify({
+                student_id: selectedStudent.id,
+                event_type: activeAction,
+                event_date: eventForm.event_date,
+                summary: eventForm.summary,
+                details: eventForm.details || null,
+                guardian_id: studentProfile?.guardians[0]?.id ?? null,
+            }),
+        });
+
+        if (!payload.success || !payload.data) {
+            throw new Error(payload.error ?? "No se pudo registrar el evento.");
+        }
+
+        if (activeAction === "contacto_tutor" && payload.data.id) {
+            await openWhatsappForEvent(payload.data.id);
+        }
+    };
+
+    const submitJustification = async () => {
+        if (!justifyForm.attendance_id) {
+            throw new Error("Selecciona una falta para justificar.");
+        }
+
+        const { payload } = await request(`/api/prefecture/attendance/${justifyForm.attendance_id}/justify`, {
+            method: "POST",
+            body: JSON.stringify({
+                reason: justifyForm.reason,
+                event_date: justifyForm.event_date,
+                summary: justifyForm.summary || undefined,
+                guardian_id: studentProfile?.guardians[0]?.id ?? null,
+            }),
+        });
+
+        if (!payload.success) {
+            throw new Error(payload.error ?? "No se pudo justificar la falta.");
+        }
+    };
+
+    const handleSubmitAction = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!activeAction) return;
+
+        try {
+            setSubmitting(true);
+
+            if (activeAction === "conducta") {
+                await submitConduct();
+                setFeedback({ type: "success", text: "Incidencia guardada y reflejada en la bitacora." });
+            } else if (activeAction === "falta_justificada") {
+                await submitJustification();
+                setFeedback({ type: "success", text: "Falta justificada correctamente desde Prefectura." });
+            } else {
+                await submitGenericEvent();
+                setFeedback({
+                    type: "success",
+                    text: activeAction === "contacto_tutor"
+                        ? "Seguimiento registrado y WhatsApp preparado."
+                        : "Evento de prefectura guardado correctamente.",
+                });
+            }
+
+            closeModal();
+            await Promise.all([loadRecentReports(), refreshSelectedStudent()]);
+        } catch (error) {
+            console.error("Error submitting prefecture action:", error);
+            setFeedback({
+                type: "error",
+                text: error instanceof Error ? error.message : "No se pudo completar la accion.",
+            });
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const deleteReport = async (id: number) => {
+        try {
+            const { payload } = await request(`/api/conduct/${id}`, { method: "DELETE" });
+            if (!payload.success) {
+                throw new Error(payload.error ?? "No se pudo eliminar el reporte.");
+            }
+
+            setReports((prev) => prev.filter((report) => report.id !== id));
+            setFeedback({ type: "success", text: "Reporte eliminado correctamente." });
+        } catch (error) {
+            console.error("Error deleting report:", error);
+            setFeedback({
+                type: "error",
+                text: error instanceof Error ? error.message : "No se pudo eliminar el reporte.",
+            });
+        }
+    };
+
+    const getReportTypeBadge = (type: string) => {
+        switch (type) {
+            case "suspension":
+                return <span className="inline-flex rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800">Suspension</span>;
+            case "amonestacion":
+                return <span className="inline-flex rounded-full border border-orange-200 bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-800">Amonestacion</span>;
+            case "nota":
+                return <span className="inline-flex rounded-full border border-blue-200 bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-800">Nota informativa</span>;
+            default:
+                return <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-800">{type}</span>;
+        }
+    };
+
+    useEffect(() => {
+        void loadRecentReports();
+    }, [loadRecentReports]);
+
+    useEffect(() => {
         const trimmedQuery = searchQuery.trim();
         if (trimmedQuery.length < 3) {
             setStudents([]);
@@ -105,202 +432,149 @@ export function PrefectPage() {
 
         const timeoutId = window.setTimeout(() => {
             void searchStudents(trimmedQuery);
-        }, 300);
+        }, 250);
 
         return () => window.clearTimeout(timeoutId);
-    }, [isModalOpen, searchQuery, selectedStudent]);
+    }, [searchQuery, searchStudents]);
 
-    const loadRecentReports = async () => {
-        try {
-            setLoading(true);
-            const token = useAuthStore.getState().token;
-            const res = await fetch("/api/conduct/recent?limit=50", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await res.json() as { success: boolean; data: ConductReport[] };
-            if (data.success) {
-                setReports(data.data || []);
-            }
-        } catch (error) {
-            console.error("Error loading reports:", error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const searchStudents = async (query: string) => {
-        if (query.length < 3) {
-            setStudents([]);
-            setSearchingStudents(false);
+    useEffect(() => {
+        if (!selectedStudent) {
+            setStudentProfile(null);
+            setAttendanceRecords([]);
             return;
         }
-        
-        try {
-            setSearchingStudents(true);
-            const token = useAuthStore.getState().token;
-            const params = new URLSearchParams({
-                search: query,
-                limit: "10",
-            });
-            const res = await fetch(`/api/students?${params.toString()}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await res.json() as { success: boolean; data: Student[] };
-            if (data.success) {
-                setStudents(data.data);
-            } else {
-                setStudents([]);
-            }
-        } catch (error) {
-            console.error("Error searching students:", error);
-            setStudents([]);
-        } finally {
-            setSearchingStudents(false);
-        }
-    };
 
-    const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setSearchQuery(e.target.value);
-    };
+        void loadStudentContext(selectedStudent);
+    }, [selectedStudent, loadStudentContext]);
 
-    const openModal = () => {
-        setIsModalOpen(true);
-        setSelectedStudent(null);
-        setSearchQuery("");
-        setStudents([]);
-        setFormData({
-            report_type: "amonestacion",
-            description: "",
-            date: format(new Date(), "yyyy-MM-dd")
-        });
-    };
-
-    const closeModal = () => {
-        setIsModalOpen(false);
-    };
-
-    const loadStudentProfile = async (studentId: number) => {
-        try {
-            setProfileOpen(true);
-            setProfileLoading(true);
-            setProfileError(null);
-            const token = useAuthStore.getState().token;
-            const res = await fetch(`/api/students/${studentId}/profile`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await res.json() as { success: boolean; data?: StudentProfileData; error?: string };
-            if (data.success && data.data) {
-                setStudentProfile(data.data);
-            } else {
-                setStudentProfile(null);
-                setProfileError(data.error ?? "No se pudo cargar la ficha del alumno.");
-            }
-        } catch (error) {
-            console.error("Error loading student profile:", error);
-            setStudentProfile(null);
-            setProfileError("No se pudo cargar la ficha del alumno.");
-        } finally {
-            setProfileLoading(false);
-        }
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!selectedStudent) return;
-        
-        try {
-            setSubmitting(true);
-            const token = useAuthStore.getState().token;
-            const payload = {
-                student_id: selectedStudent.id,
-                ...formData
-            };
-
-            const res = await fetch("/api/conduct", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify(payload)
-            });
-
-            const data = await res.json() as { success: boolean; error?: string };
-            if (data.success) {
-                closeModal();
-                setFeedback({ type: "success", text: "Incidencia guardada correctamente." });
-                loadRecentReports();
-                void loadStudentProfile(selectedStudent.id);
-            } else {
-                setFeedback({ type: "error", text: data.error ?? "No se pudo guardar la incidencia." });
-            }
-        } catch (error) {
-            console.error("Error submitting report:", error);
-            setFeedback({ type: "error", text: "No se pudo guardar la incidencia." });
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const deleteReport = async (id: number) => {
-        try {
-            const token = useAuthStore.getState().token;
-            const res = await fetch(`/api/conduct/${id}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await res.json() as { success: boolean; error?: string };
-            
-            if (data.success) {
-                setReports(prev => prev.filter(r => r.id !== id));
-                setFeedback({ type: "success", text: "Reporte eliminado correctamente." });
-            } else {
-                setFeedback({ type: "error", text: data.error ?? "No se pudo eliminar el reporte." });
-            }
-        } catch (error) {
-            console.error("Error deleting report:", error);
-            setFeedback({ type: "error", text: "No se pudo eliminar el reporte." });
-        }
-    };
-
-    const getReportTypeBadge = (type: string) => {
-        switch (type) {
-            case "suspension":
-                return <span className="inline-flex py-1 px-2.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">Suspensión</span>;
-            case "amonestacion":
-                return <span className="inline-flex py-1 px-2.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200">Amonestación</span>;
-            case "nota":
-                return <span className="inline-flex py-1 px-2.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">Nota Positiva/Informativa</span>;
-            default:
-                return <span className="inline-flex py-1 px-2.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{type}</span>;
-        }
-    };
+    const absencesToJustify = attendanceRecords.filter((record) => record.status === "absent");
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center">
-                        <ShieldAlert className="w-7 h-7 mr-2 text-brand-600" />
-                        Módulo de Prefectura
-                    </h1>
-                    <p className="text-gray-500 mt-1">Gestión de incidencias y reportes disciplinarios</p>
-                </div>
+        <div className="space-y-6">
+            <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.18),_transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fafc_52%,#eef6ff_100%)] shadow-sm">
+                <div className="grid gap-6 px-6 py-7 lg:grid-cols-[1.15fr_0.85fr] lg:px-8">
+                    <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.26em] text-brand-700">Prefectura integral</p>
+                        <h1 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight text-slate-950">
+                            <ShieldAlert className="h-8 w-8 text-brand-600" />
+                            Consola de bitacora y seguimiento
+                        </h1>
+                        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+                            Busca al alumno, captura acciones operativas y deja trazabilidad lista para seguimiento con tutor.
+                        </p>
 
-                <div className="flex gap-2">
-                    <button 
-                        onClick={openModal}
-                        className="flex items-center px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors shadow-sm"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Nuevo Reporte
-                    </button>
+                        <div className="mt-6 max-w-2xl">
+                            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                Buscar alumno
+                            </label>
+                            <div className="relative">
+                                <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Nombre, matricula o grupo"
+                                    className="w-full rounded-2xl border border-slate-200 bg-white/90 py-3 pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+                                />
+                            </div>
+                            <div className="mt-2 min-h-6 text-xs text-slate-500">
+                                {searchingStudents ? "Buscando alumnos..." : "Escribe al menos 3 caracteres para activar la busqueda."}
+                            </div>
+                            {students.length > 0 && (
+                                <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                                    {students.map((student) => (
+                                        <button
+                                            key={student.id}
+                                            type="button"
+                                            onClick={() => handleSelectStudent(student)}
+                                            className="flex w-full items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 last:border-b-0"
+                                        >
+                                            <div>
+                                                <p className="text-sm font-medium text-slate-900">
+                                                    {student.paterno} {student.materno} {student.name}
+                                                </p>
+                                                <p className="text-xs text-slate-500">
+                                                    {student.no_control} · Grupo {student.grupo || "Sin grupo"}
+                                                </p>
+                                            </div>
+                                            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
+                                                Seleccionar
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="rounded-[24px] border border-slate-200 bg-white/90 p-5 shadow-sm backdrop-blur">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Alumno activo</p>
+                        {selectedStudent ? (
+                            <div className="mt-4 space-y-4">
+                                <div className="rounded-2xl border border-brand-100 bg-brand-50/70 p-4">
+                                    <div className="flex items-start gap-3">
+                                        <div className="rounded-2xl bg-white p-3 text-brand-600 shadow-sm">
+                                            <UserCircle className="h-6 w-6" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-lg font-semibold text-slate-900">
+                                                {selectedStudent.paterno} {selectedStudent.materno} {selectedStudent.name}
+                                            </p>
+                                            <p className="mt-1 text-sm text-slate-600">
+                                                {selectedStudent.no_control} · Grupo {selectedStudent.grupo || "Sin grupo"}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                                        <p className="text-xs uppercase tracking-wide text-slate-500">Tutor principal</p>
+                                        <p className="mt-2 text-sm font-medium text-slate-900">
+                                            {studentProfile?.guardians[0]?.name || "Sin tutor"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                                        <p className="text-xs uppercase tracking-wide text-slate-500">Telefono</p>
+                                        <p className="mt-2 text-sm font-medium text-slate-900">
+                                            {studentProfile?.guardians[0]?.phone || "Sin telefono"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                                        <p className="text-xs uppercase tracking-wide text-slate-500">Faltas pendientes</p>
+                                        <p className="mt-2 text-sm font-medium text-slate-900">{absencesToJustify.length}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setProfileOpen(true)}
+                                        className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                                    >
+                                        <Eye className="mr-2 h-4 w-4" />
+                                        Abrir ficha lateral
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedStudent(null)}
+                                        className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                                    >
+                                        Limpiar seleccion
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                                La consola prioriza un alumno a la vez. Selecciona uno para habilitar acciones rapidas, ficha y justificacion de faltas.
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
+            </section>
 
             {feedback && (
-                <div className={`rounded-xl border px-4 py-3 text-sm ${
+                <div className={`rounded-2xl border px-4 py-3 text-sm ${
                     feedback.type === "success"
                         ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                         : "border-red-200 bg-red-50 text-red-700"
@@ -309,246 +583,357 @@ export function PrefectPage() {
                 </div>
             )}
 
-            {/* Content Area */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                    <h2 className="font-medium text-gray-900 flex items-center">
-                        <FileText className="w-4 h-4 mr-2 text-gray-500" />
-                        Reportes Recientes
-                    </h2>
-                    <button className="text-sm text-gray-500 hover:text-gray-900 flex items-center">
-                        <Filter className="w-4 h-4 mr-1" />
-                        Filtros
-                    </button>
-                </div>
-                
-                {loading ? (
-                    <div className="p-12 text-center text-gray-500 flex flex-col items-center">
-                        <div className="w-8 h-8 border-4 border-gray-200 border-t-brand-500 rounded-full animate-spin mb-4" />
-                        Cargando reportes...
-                    </div>
-                ) : reports.length === 0 ? (
-                    <div className="p-16 text-center text-gray-500">
-                        <div className="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
-                            <ShieldAlert className="w-8 h-8 text-gray-400" />
+            <div className="grid gap-6 xl:grid-cols-[1.08fr_1fr]">
+                <div className="space-y-6">
+                    <StudentProfileCard
+                        profile={studentProfile}
+                        loading={profileLoading}
+                        error={profileError}
+                    />
+
+                    <PrefectureQuickActions
+                        disabled={!selectedStudent}
+                        onSelect={openAction}
+                    />
+
+                    <section className="card">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                            <UserSquare2 className="h-4 w-4 text-brand-600" />
+                            Asistencias recientes del alumno
                         </div>
-                        <h3 className="text-lg font-medium text-gray-900">No hay reportes recientes</h3>
-                        <p className="mt-1">Crea un nuevo reporte usando el botón superior.</p>
+                        <div className="mt-4 space-y-3">
+                            {attendanceLoading ? (
+                                <div className="flex items-center gap-2 text-sm text-slate-500">
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                    Cargando asistencias...
+                                </div>
+                            ) : attendanceRecords.length === 0 ? (
+                                <p className="text-sm text-slate-500">Selecciona un alumno para revisar sus faltas y registros recientes.</p>
+                            ) : (
+                                attendanceRecords.slice(0, 6).map((record) => (
+                                    <div key={record.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div>
+                                                <p className="text-sm font-medium text-slate-900">{record.subject_name}</p>
+                                                <p className="text-xs text-slate-500">
+                                                    {record.group_name} · Modulo {record.period_num}
+                                                </p>
+                                            </div>
+                                            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                                                record.status === "absent"
+                                                    ? "bg-red-100 text-red-700"
+                                                    : record.status === "justified"
+                                                        ? "bg-emerald-100 text-emerald-700"
+                                                        : record.status === "late"
+                                                            ? "bg-amber-100 text-amber-700"
+                                                            : "bg-slate-200 text-slate-700"
+                                            }`}>
+                                                {record.status === "absent"
+                                                    ? "Falta"
+                                                    : record.status === "justified"
+                                                        ? "Justificada"
+                                                        : record.status === "late"
+                                                            ? "Retardo"
+                                                            : "Asistencia"}
+                                            </span>
+                                        </div>
+                                        <p className="mt-2 text-xs text-slate-500">{format(parseISO(record.date), "dd/MM/yyyy")}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </section>
+                </div>
+
+                <section className="card overflow-hidden !p-0">
+                    <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-4">
+                        <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Actividad reciente</p>
+                            <h2 className="mt-1 text-lg font-semibold text-slate-900">Reportes disciplinarios</h2>
+                        </div>
+                        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
+                            {reports.length} registros
+                        </span>
                     </div>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                                <tr>
-                                    <th className="px-6 py-4">Fecha</th>
-                                    <th className="px-6 py-4">Alumno</th>
-                                    <th className="px-6 py-4">Tipo</th>
-                                    <th className="px-6 py-4">Descripción</th>
-                                    <th className="px-6 py-4">Reportado por</th>
-                                    <th className="px-6 py-4 text-right">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {reports.map((report) => (
-                                    <tr key={report.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">
-                                            {format(parseISO(report.date), "dd/MM/yyyy")}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="font-medium text-gray-900">
-                                                {report.paterno} {report.materno} {report.student_name}
-                                            </div>
-                                            <div className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
-                                                <span>{report.no_control}</span>
-                                                <span className="w-1 h-1 rounded-full bg-gray-300" />
-                                                <span>Grupo {report.grupo}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {getReportTypeBadge(report.report_type)}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600 max-w-xs truncate" title={report.description}>
-                                            {report.description}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-500 text-xs">
-                                            {report.reported_by_name || 'Sistema'}
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <button
-                                                    onClick={() => void loadStudentProfile(report.student_id)}
-                                                    className="p-1.5 text-brand-600 hover:bg-brand-50 rounded-md transition-colors"
-                                                    title="Ver perfil del alumno"
-                                                >
-                                                    <Eye className="w-4 h-4" />
-                                                </button>
-                                                <button 
-                                                    onClick={() => deleteReport(report.id)}
-                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                                                    title="Eliminar reporte"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </td>
+                    {loading ? (
+                        <div className="flex items-center justify-center gap-3 p-12 text-sm text-slate-500">
+                            <LoaderCircle className="h-5 w-5 animate-spin" />
+                            Cargando reportes...
+                        </div>
+                    ) : reports.length === 0 ? (
+                        <div className="p-12 text-center text-slate-500">
+                            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+                                <ShieldAlert className="h-8 w-8 text-slate-400" />
+                            </div>
+                            <h3 className="mt-4 text-lg font-medium text-slate-900">No hay reportes recientes</h3>
+                            <p className="mt-1 text-sm">Usa las acciones rapidas para comenzar la bitacora operativa.</p>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                                    <tr>
+                                        <th className="px-5 py-3">Fecha</th>
+                                        <th className="px-5 py-3">Alumno</th>
+                                        <th className="px-5 py-3">Tipo</th>
+                                        <th className="px-5 py-3">Descripcion</th>
+                                        <th className="px-5 py-3">Responsable</th>
+                                        <th className="px-5 py-3 text-right">Acciones</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {reports.map((report) => {
+                                        const reportStudent: Student = {
+                                            id: report.student_id,
+                                            no_control: report.no_control || "",
+                                            name: report.student_name || "",
+                                            paterno: report.paterno || "",
+                                            materno: report.materno || "",
+                                            grupo: report.grupo || "",
+                                        };
+
+                                        return (
+                                            <tr key={report.id} className="align-top transition hover:bg-slate-50/70">
+                                                <td className="px-5 py-4 font-medium text-slate-900">
+                                                    {format(parseISO(report.date), "dd/MM/yyyy")}
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <p className="font-medium text-slate-900">
+                                                        {report.paterno} {report.materno} {report.student_name}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-slate-500">
+                                                        {report.no_control} · Grupo {report.grupo}
+                                                    </p>
+                                                </td>
+                                                <td className="px-5 py-4">{getReportTypeBadge(report.report_type)}</td>
+                                                <td className="max-w-xs px-5 py-4 text-slate-600" title={report.description}>
+                                                    {report.description}
+                                                </td>
+                                                <td className="px-5 py-4 text-xs text-slate-500">
+                                                    {report.reported_by_name || "Sistema"}
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div className="flex justify-end gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSelectStudent(reportStudent)}
+                                                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-white"
+                                                        >
+                                                            Usar alumno
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void handleOpenProfile(reportStudent)}
+                                                            className="rounded-lg p-2 text-brand-600 transition hover:bg-brand-50"
+                                                            title="Ver ficha del alumno"
+                                                        >
+                                                            <Eye className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void deleteReport(report.id)}
+                                                            className="rounded-lg p-2 text-red-500 transition hover:bg-red-50"
+                                                            title="Eliminar reporte"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </section>
             </div>
 
-            {/* Modal: Nuevo Reporte */}
-            {isModalOpen && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                            <h2 className="text-lg font-bold text-gray-900 flex items-center">
-                                <AlertTriangle className="w-5 h-5 mr-2 text-brand-500" />
-                                Registrar Incidencia
-                            </h2>
-                            <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 p-1 rounded-lg transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        
-                        <div className="p-6 overflow-y-auto">
-                            <form id="conduct-form" onSubmit={handleSubmit} className="space-y-5">
-                                {/* Student Selection */}
+            {activeAction && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+                    <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+                        <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
+                            <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Buscar Alumno <span className="text-red-500">*</span>
-                                    </label>
-                                    {!selectedStudent ? (
-                                        <div className="relative">
-                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                            <input
-                                                type="text"
-                                                placeholder="Búsqueda por nombre o matrícula (min. 3 letras)..."
-                                                value={searchQuery}
-                                                onChange={handleSearchChange}
-                                                className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                                            />
-                                            {searchingStudents && (
-                                                <div className="mt-2 text-xs text-gray-500">
-                                                    Buscando alumnos...
-                                                </div>
-                                            )}
-                                            {students.length > 0 && (
-                                                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
-                                                    {students.map(s => (
-                                                        <div 
-                                                            key={s.id}
-                                                            onClick={() => {
-                                                                setSelectedStudent(s);
-                                                                setSearchQuery("");
-                                                                setStudents([]);
-                                                                void loadStudentProfile(s.id);
-                                                            }}
-                                                            className="px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0"
-                                                        >
-                                                            <div className="font-medium text-sm text-gray-900">{s.paterno} {s.materno} {s.name}</div>
-                                                            <div className="text-xs text-gray-500">{s.no_control} - {s.grupo}</div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center justify-between p-3 bg-brand-50 border border-brand-100 rounded-lg">
-                                            <div className="flex items-center">
-                                                <UserCircle className="w-8 h-8 text-brand-600 mr-3" />
-                                                <div>
-                                                    <div className="font-medium text-brand-900 text-sm">{selectedStudent.paterno} {selectedStudent.materno} {selectedStudent.name}</div>
-                                                    <div className="text-xs text-brand-700">{selectedStudent.no_control} • Grupo {selectedStudent.grupo}</div>
-                                                </div>
-                                            </div>
-                                            <button 
-                                                type="button"
-                                                onClick={() => setSelectedStudent(null)}
-                                                className="p-1.5 text-brand-600 hover:bg-brand-100 rounded-md transition-colors"
-                                                title="Cambiar alumno"
-                                            >
-                                                <X className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    )}
+                                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Accion rapida</p>
+                                    <h2 className="mt-1 text-xl font-semibold text-slate-900">{actionTitles[activeAction]}</h2>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        {selectedStudent
+                                            ? `${selectedStudent.paterno} ${selectedStudent.materno} ${selectedStudent.name}`
+                                            : "Selecciona un alumno antes de continuar."}
+                                    </p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={closeModal}
+                                    className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Tipo de Reporte <span className="text-red-500">*</span>
-                                        </label>
-                                        <select
-                                            value={formData.report_type}
-                                            onChange={e => setFormData({ ...formData, report_type: e.target.value as any })}
-                                            className="w-full text-sm border-gray-200 rounded-lg focus:ring-brand-500 focus:border-brand-500"
-                                            required
-                                        >
-                                            <option value="amonestacion">Amonestación verbal/escrita</option>
-                                            <option value="suspension">Suspensión</option>
-                                            <option value="nota">Nota Positiva/Informativa</option>
-                                        </select>
+                        <form onSubmit={handleSubmitAction} className="overflow-y-auto px-6 py-6">
+                            {activeAction === "conducta" && (
+                                <div className="space-y-5">
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-slate-700">Tipo de reporte</label>
+                                            <select
+                                                value={conductForm.report_type}
+                                                onChange={(e) => setConductForm((prev) => ({ ...prev, report_type: e.target.value as "amonestacion" | "suspension" | "nota" }))}
+                                                className="input-field"
+                                            >
+                                                <option value="amonestacion">Amonestacion verbal o escrita</option>
+                                                <option value="suspension">Suspension</option>
+                                                <option value="nota">Nota informativa</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha</label>
+                                            <input
+                                                type="date"
+                                                value={conductForm.date}
+                                                onChange={(e) => setConductForm((prev) => ({ ...prev, date: e.target.value }))}
+                                                className="input-field"
+                                            />
+                                        </div>
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Fecha de Incidencia <span className="text-red-500">*</span>
-                                        </label>
-                                        <input
-                                            type="date"
-                                            value={formData.date}
-                                            onChange={e => setFormData({ ...formData, date: e.target.value })}
-                                            className="w-full text-sm border-gray-200 rounded-lg focus:ring-brand-500 focus:border-brand-500"
+                                        <label className="mb-1 block text-sm font-medium text-slate-700">Descripcion</label>
+                                        <textarea
+                                            value={conductForm.description}
+                                            onChange={(e) => setConductForm((prev) => ({ ...prev, description: e.target.value }))}
+                                            className="input-field min-h-32 resize-none"
+                                            placeholder="Describe la incidencia disciplinaria."
                                             required
                                         />
                                     </div>
                                 </div>
+                            )}
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Descripción <span className="text-red-500">*</span>
-                                    </label>
-                                    <textarea
-                                        value={formData.description}
-                                        onChange={e => setFormData({ ...formData, description: e.target.value })}
-                                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-brand-500 focus:border-brand-500 resize-none h-28"
-                                        placeholder="Describe la incidencia o reporte..."
-                                        required
-                                    />
+                            {activeAction === "falta_justificada" && (
+                                <div className="space-y-5">
+                                    <div>
+                                        <label className="mb-1 block text-sm font-medium text-slate-700">Falta a justificar</label>
+                                        <select
+                                            value={justifyForm.attendance_id}
+                                            onChange={(e) => setJustifyForm((prev) => ({ ...prev, attendance_id: e.target.value }))}
+                                            className="input-field"
+                                            required
+                                        >
+                                            <option value="">Selecciona una falta</option>
+                                            {absencesToJustify.map((record) => (
+                                                <option key={record.id} value={record.id}>
+                                                    {format(parseISO(record.date), "dd/MM/yyyy")} · {record.subject_name} · Modulo {record.period_num}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {absencesToJustify.length === 0 && (
+                                            <p className="mt-2 text-xs text-amber-700">
+                                                No hay faltas recientes pendientes. Si ya fue justificada, aparecera como asistencia valida.
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha de justificacion</label>
+                                            <input
+                                                type="date"
+                                                value={justifyForm.event_date}
+                                                onChange={(e) => setJustifyForm((prev) => ({ ...prev, event_date: e.target.value }))}
+                                                className="input-field"
+                                                required
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-slate-700">Resumen visible</label>
+                                            <input
+                                                type="text"
+                                                value={justifyForm.summary}
+                                                onChange={(e) => setJustifyForm((prev) => ({ ...prev, summary: e.target.value }))}
+                                                className="input-field"
+                                                placeholder="Opcional"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-sm font-medium text-slate-700">Motivo</label>
+                                        <textarea
+                                            value={justifyForm.reason}
+                                            onChange={(e) => setJustifyForm((prev) => ({ ...prev, reason: e.target.value }))}
+                                            className="input-field min-h-28 resize-none"
+                                            placeholder="Captura la razon de la justificacion."
+                                            required
+                                        />
+                                    </div>
                                 </div>
-                            </form>
-                        </div>
-                        
-                        <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 rounded-b-2xl">
-                            <button
-                                type="button"
-                                onClick={closeModal}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="submit"
-                                form="conduct-form"
-                                disabled={submitting || !selectedStudent}
-                                className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg hover:bg-brand-700 transition-colors disabled:opacity-50 min-w-[120px]"
-                            >
-                                {submitting ? (
-                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                ) : (
-                                    <>
-                                        <Save className="w-4 h-4 mr-2" />
-                                        Guardar
-                                    </>
-                                )}
-                            </button>
-                        </div>
+                            )}
+
+                            {activeAction !== "conducta" && activeAction !== "falta_justificada" && (
+                                <div className="space-y-5">
+                                    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-600">
+                                        El evento se registrara como <strong className="font-semibold text-slate-900">{getPrefectureEventLabel(activeAction)}</strong> y quedara disponible para timeline y seguimiento.
+                                        {activeAction === "contacto_tutor" && " Ademas se preparara el mensaje sugerido para WhatsApp."}
+                                    </div>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-slate-700">Fecha del evento</label>
+                                            <input
+                                                type="date"
+                                                value={eventForm.event_date}
+                                                onChange={(e) => setEventForm((prev) => ({ ...prev, event_date: e.target.value }))}
+                                                className="input-field"
+                                                required
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-slate-700">Resumen</label>
+                                            <input
+                                                type="text"
+                                                value={eventForm.summary}
+                                                onChange={(e) => setEventForm((prev) => ({ ...prev, summary: e.target.value }))}
+                                                className="input-field"
+                                                placeholder="Resumen breve para la bitacora"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-sm font-medium text-slate-700">Detalle</label>
+                                        <textarea
+                                            value={eventForm.details}
+                                            onChange={(e) => setEventForm((prev) => ({ ...prev, details: e.target.value }))}
+                                            className="input-field min-h-32 resize-none"
+                                            placeholder="Agrega contexto util para seguimiento."
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-5">
+                                <button type="button" onClick={closeModal} className="btn-secondary">
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={submitting || !selectedStudent}
+                                    className="btn-primary inline-flex items-center"
+                                >
+                                    {submitting ? (
+                                        <>
+                                            <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                                            Guardando
+                                        </>
+                                    ) : (
+                                        activeAction === "contacto_tutor" ? "Guardar y abrir WhatsApp" : "Guardar accion"
+                                    )}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}
-
             {profileOpen && (
                 <div className="fixed inset-0 z-40 flex justify-end bg-black/30 backdrop-blur-sm">
                     <div className="h-full w-full max-w-xl overflow-y-auto border-l border-gray-200 bg-gray-50 shadow-2xl">
@@ -623,7 +1008,7 @@ export function PrefectPage() {
 
                                     <section className="card">
                                         <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                                            <UserSquare2 className="h-4 w-4 text-brand-600" />
+                                            <AlertTriangle className="h-4 w-4 text-brand-600" />
                                             Incidencias recientes
                                         </h3>
                                         <div className="mt-4 space-y-2">
