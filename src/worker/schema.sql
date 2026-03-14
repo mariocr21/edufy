@@ -172,6 +172,28 @@ CREATE TABLE IF NOT EXISTS conduct_reports (
   FOREIGN KEY (reported_by) REFERENCES users(id)
 );
 
+-- ── Prefecture Events ──
+CREATE TABLE IF NOT EXISTS prefecture_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('conducta', 'falta_justificada', 'retardo', 'salida', 'citatorio', 'contacto_tutor', 'observacion')),
+  event_date TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  details TEXT,
+  created_by INTEGER NOT NULL,
+  related_attendance_id INTEGER,
+  related_conduct_id INTEGER,
+  guardian_id INTEGER,
+  whatsapp_message TEXT,
+  whatsapp_opened_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  FOREIGN KEY (related_attendance_id) REFERENCES attendance(id),
+  FOREIGN KEY (related_conduct_id) REFERENCES conduct_reports(id),
+  FOREIGN KEY (guardian_id) REFERENCES guardians(id)
+);
+
 -- ── Credentials ──
 CREATE TABLE IF NOT EXISTS credentials (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
